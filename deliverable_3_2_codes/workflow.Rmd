@@ -1,0 +1,112 @@
+---
+title: "ENCLOSE Data Processing and Matching Workflow"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# 0. Data Preparation
+
+**Input files:**  
+- `EES9.sav`  
+- `ESS11.sav`
+
+**Code:** `ENCLOSE_harmonization_panel_clean.Rmd`  
+**Output:** `h_ENCLOSE_data_panel`
+
+*Description:*  
+This step select variables from the two surveys, aligns coding, and produces an harmonized dataset.
+
+---
+
+# 1. Latent Trait Estimation
+
+**Input:** `h_ENCLOSE_data_panel`  
+**Code:** `ENCLOSE_Latent_traits_estimation_configural_clean.Rmd`  
+**Output:** `h_ENCLOSE_data_panel_latenttraits_configural.RData`
+
+*Description:*  
+Estimates latent traits under a configural model to capture underlying constructs (e.g., satisfaction, trust).
+
+---
+
+# 2. Matching Methods
+
+## 2.1 Propensity Score Matching – Nearest Neighbor
+
+**Input:** `h_ENCLOSE_data_panel_latenttraits_configural.RData`  
+**Code:** `ENCLOSE_pseudo_panel_psm_nn_clean.Rmd`  
+**Output:**  
+- `ENCLOSE_pseudopanel_psm_nearest.RData`  
+- `PSM_nearest_results.xlsx` 
+
+---
+
+## 2.2 Propensity Score Matching – Optimal
+
+**Code:** `ENCLOSE_pseudo_panel_psm_optimal_clean.Rmd`  
+**Output:**  
+- `ENCLOSE_pseudopanel_psm_optimal.RData`  
+- `PSM_optimal_results.xlsx`
+
+---
+
+## 2.3 Propensity Score Matching – Full Optimal
+
+**Code:** `ENCLOSE_pseudo_panel_psm_full_clean.Rmd`  
+**Output:**  
+- `ENCLOSE_pseudopanel_psm_full.RData`  
+- `PSM_full_results.xlsx`
+
+---
+
+## 2.4 Hotdeck Imputation
+
+**Code:** `ENCLOSE_pseudo_panel_hotdeck_clean.Rmd`  
+**Output:**  
+- `ENCLOSE_pseudopanel_hotdeck.RData`  
+- `hotdeck_change_significance_by_country.xlsx`
+
+**Plots:**  
+- `density_SATISFACTION_hotdeck.png` (original vs. imputed)  
+- `density_TRUST_hotdeck.png` (original vs. imputed)  
+- `density_SATISFACTION_1823_hotdeck.png` (2018–2023 comparison)  
+- `density_TRUST_1823_hotdeck.png` (2018–2023 comparison)
+
+---
+
+## 2.5 Predictive Mean Matching (PMM)
+
+**Code:** `ENCLOSE_pseudo_panel_pmm_clean.Rmd`  
+**Output:**  
+- `ENCLOSE_pseudopanel_hotdeck.RData`  
+- `hotdeck_change_significance_by_country.xlsx`
+
+**Plots:**  
+- `density_SATISFACTION_hotdeck.png`  
+- `density_TRUST_hotdeck.png`  
+- `density_SATISFACTION_1823_hotdeck.png`  
+- `density_TRUST_1823_hotdeck.png`
+
+---
+
+\pagebreak
+
+# 3. Summary Workflow Diagram
+
+```{r diagram, echo=FALSE, message=FALSE, warning=FALSE, out.width="100%", out.height="500px"}
+library(DiagrammeR)
+mermaid("
+graph TD
+    A[EES9.sav] --> C[Data Preparation]
+    B[ESS11.sav] --> C
+    C --> D[Latent Trait Estimation]
+    D --> E[PSM Nearest Neighbor]
+    D --> F[PSM Optimal]
+    D --> G[PSM Full Optimal]
+    D --> H[Hotdeck]
+    D --> I[PMM]
+")
+
+```
+`

@@ -1,0 +1,1042 @@
+---
+title: "ENCLOSE: Data Harmonization"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: true
+    toc_depth: 3
+    code_folding: show
+  pdf_document: default
+---
+```{r packages}
+# Packages
+if (!requireNamespace('dplyr', quietly = TRUE)) install.packages('dplyr')
+library(dplyr)
+if (!requireNamespace('haven', quietly = TRUE)) install.packages('haven')
+library(haven)
+if (!requireNamespace('labelled', quietly = TRUE)) install.packages('labelled')
+library(labelled)
+if (!requireNamespace('mirt', quietly = TRUE)) install.packages('mirt')
+library(mirt)
+if (!requireNamespace('stringr', quietly = TRUE)) install.packages('stringr')
+library(stringr)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+
+```{r packages-001, include=TRUE, message=FALSE, warning=FALSE}
+library(haven)
+library(dplyr)
+library(labelled)
+library(stringr)
+library(mirt)
+```
+
+```{r packages-002}
+ESS10 <- read_sav("ESS10.sav")
+ZA7649 <- read_sav("ZA7649_v2-1-0.sav")
+
+# initialize datasets
+ESS10_h=ESS10      # _h stand for harmonized
+ZA7649_h=ZA7649    # _h stand for harmonized
+```
+
+# COMMON VARIABLES
+
+## OBSERVED COMMON VARIABLES
+### Age
+```{r age-003}
+#summary(ESS10$agea)
+ESS10_h <- ESS10_h[!is.na(ESS10_h$agea), ]
+#summary(ZA7649$d11)
+ZA7649_h <- ZA7649_h[!is.na(ZA7649_h$d11), ]
+```
+
+### Gender
+```{r gender-004}
+ESS10_h=subset(ESS10_h, gndr %in% c(1,2))
+ESS10_h$gndr <- labelled(ESS10_h$gndr,
+                         c("Man" = 1,
+                           "Woman" = 2
+                         ))
+
+# split missing values of ZA7649$d10
+ZA7649_h=subset(ZA7649_h, d10 %in% c(1,2))
+
+# Recoding values and labels of ZA7649_h$d10
+ZA7649_h$d10 <- labelled(ZA7649_h$d10,
+                            c("Man" = 1,
+                              "Woman" = 2))
+```
+
+### Occupation
+```{r occupation-005}
+# split missing values of ESS10$mnactic
+ESS10_h=subset(ESS10_h, mnactic %in% c(1,2,3,4,5,6,7,8))
+
+# Recoding values and labels of ESS10$mnactic
+ESS10_h=ESS10_h %>%
+mutate(mnactic = case_when(
+    mnactic %in% c(1,7) ~ 1,
+    mnactic %in% c(3,4,8) ~ 2,
+    mnactic %in% c(5,6) ~ 3,
+    mnactic == 2 ~ 4
+  ))
+ESS10_h$mnactic <- labelled(ESS10_h$mnactic,
+        c("Employed" = 1,
+          "Unemployed" = 2,
+          "Retired" = 3,
+          "Education" = 4))
+
+# split missing values of ZA7649$d15a
+ZA7649_h=subset(ZA7649_h, d15a %in% c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18))
+
+# Recoding values and labels of ZA7649$d15a
+ZA7649_h=ZA7649_h %>%
+  mutate(d15a = case_when(
+    d15a %in% c(1,5,6,7,8,9,10,11,12,13,14,15,16,17,18) ~ 1,
+    d15a == 3 ~ 2,
+    d15a == 4 ~ 3,
+    d15a == 2 ~ 4
+  ))
+ZA7649_h$d15a <- labelled(ZA7649_h$d15a,
+                            c("Employed" = 1,
+                              "Unemployed" = 2,
+                              "Retired" = 3,
+                              "Education" = 4))
+
+```
+
+
+### Domicile
+```{r domicile-006}
+# split missing values of ESS10$domicil
+ESS10_h=subset(ESS10_h, domicil %in% c(1,2,3,4,5))
+
+# Recoding values and labels of ESS10$domicil
+ESS10_h=ESS10_h %>%
+  mutate(domicil = case_when(
+    domicil %in% c(1,2) ~ 1,
+    domicil == 3 ~ 2,
+    domicil %in% c(4,5) ~ 3
+  ))
+ESS10_h$domicil <- labelled(ESS10_h$domicil,
+                             c("A big city or large town" = 1,
+                               "Small middle town" = 2,
+                               "Rural Area or village" = 3))
+# split missing values of ZA7649$d25
+ZA7649_h=subset(ZA7649_h, d25 %in% c(1,2,3))
+
+# Recoding values and labels of ZA7649$d25
+ZA7649_h=ZA7649_h %>%
+  mutate(d25 = case_when(
+    d25 == 3 ~ 1,
+    d25 == 2 ~ 2,
+    d25 == 1 ~ 3
+  ))
+ZA7649_h$d25 <- labelled(ZA7649_h$d25,
+                         c("A big city or large town" = 1,
+                           "Small middle town" = 2,
+                           "Rural Area or village" = 3))
+
+```
+
+### Subjective income: economic difficulties
+```{r subjective-income-economic-difficulties-007}
+# split missing values of ESS10$hincfel
+ESS10_h=subset(ESS10_h, hincfel %in% c(1,2,3,4))
+
+# Recoding values and labels of ESS10$hincfel
+ESS10_h=ESS10_h %>%
+  mutate(hincfel = case_when(
+    hincfel %in% c(1,2) ~ 1,
+    hincfel %in% c(3,4) ~ 2
+  ))
+ESS10_h$hincfel <- labelled(ESS10_h$hincfel,
+                            c("No" = 1,
+                              "Yes" = 2))
+
+# split missing values of ZA7649$d60
+ZA7649_h=subset(ZA7649_h, d60 %in% c(1,2,3))
+
+# Recoding values and labels of ZA7649$d60
+ZA7649_h=ZA7649_h %>%
+  mutate(d60 = case_when(
+    d60 == 3 ~ 1,
+    d60 %in% c(1,2) ~ 2
+  ))
+ZA7649_h$d60 <- labelled(ZA7649_h$d60,
+                         c("No" = 1,
+                              "Yes" = 2))
+
+```
+
+
+### Life Satisfaction
+```{r life-satisfaction-008}
+# split missing values of ESS10$stflife
+ESS10_h=subset(ESS10_h, stflife %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$stflife
+ESS10_h=ESS10_h %>%
+  mutate(stflife = case_when(
+    stflife %in% c(0,1,2) ~ 1,
+    stflife %in% c(3,4,5) ~ 2,
+    stflife %in% c(6,7,8) ~ 3,
+    stflife %in% c(9,10) ~ 4
+  ))
+ESS10_h$stflife <- labelled(ESS10_h$stflife,
+                            c("Not at all satisfied" = 1,
+                              "Not very satisfied" = 2,
+                              "Fairly satisfied" = 3,
+                              "Very satisfied" = 4))
+
+
+# split missing values of ZA7649$d70
+ZA7649_h=subset(ZA7649_h, d70 %in% c(1,2,3,4))
+
+# Recoding values and labels of ZA7649$d70
+ZA7649_h=ZA7649_h %>%
+  mutate(d70 = case_when(
+    d70  == 4 ~ 1,
+    d70  == 3 ~ 2,
+    d70  == 2 ~ 3,
+    d70  == 1 ~ 4
+  ))
+ZA7649_h$d70 <- labelled(ZA7649_h$d70,
+                         c("Not at all satisfied" = 1,
+                           "Not very satisfied" = 2,
+                           "Fairly satisfied" = 3,
+                             "Very satisfied" = 4))
+
+```
+
+
+### Satisfaction with national economy
+```{r satisfaction-with-national-economy-009}
+# split missing values of ESS10$stfeco
+ESS10_h=subset(ESS10_h, stfeco %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$stfeco
+ESS10_h=ESS10_h %>%
+  mutate(stfeco = case_when(
+    stfeco %in% c(0,1,2) ~ 1,
+    stfeco %in% c(3,4,5) ~ 2,
+    stfeco %in% c(6,7,8) ~ 3,
+    stfeco %in% c(9,10) ~ 4
+  ))
+ESS10_h$stfeco <- labelled(ESS10_h$stfeco,
+                           c("Very bad" = 1,
+                             "Rather bad" = 2,
+                             "Rather good" = 3,
+                             "Very good" = 4))
+
+# split missing values of ZA7649$qa1a_2
+ZA7649_h=subset(ZA7649_h, qa1a_2 %in% c(1,2,3,4))
+
+# Recoding values and labels of ZA7649$qa1a_2
+ZA7649_h=ZA7649_h %>%
+  mutate(qa1a_2 = case_when(
+    qa1a_2 ==4 ~ 1,
+    qa1a_2 ==3 ~ 2,
+    qa1a_2 ==2 ~ 3,
+    qa1a_2 ==1 ~ 4
+  ))
+ZA7649_h$qa1a_2 <- labelled(ZA7649_h$qa1a_2,
+                             c("Very bad" = 1,
+                               "Rather bad" = 2,
+                               "Rather good" = 3,
+                               "Very good" = 4))
+```
+
+### Attachment to country
+```{r attachment-to-country-010}
+# split missing values of ESS10$atchctr
+ESS10_h=subset(ESS10_h, atchctr %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$atchctr
+ESS10_h=ESS10_h %>%
+  mutate(atchctr = case_when(
+    atchctr %in% c(0,1,2) ~ 1,
+    atchctr %in% c(3,4,5) ~ 2,
+    atchctr %in% c(6,7,8) ~ 3,
+    atchctr %in% c(9,10) ~ 4
+  ))
+ESS10_h$atchctr <- labelled(ESS10_h$atchctr,
+                           c("Not at all attached" = 1,
+                             "Not very attached" = 2,
+                             "Fairly attached" = 3,
+                             "Very attached" = 4))
+
+
+# split missing values of ZA7649$qc1a_2
+ZA7649_h=subset(ZA7649_h, qc1a_2 %in% c(1,2,3,4))
+
+# Recoding values and labels of ZA7649$qa1a_2
+ZA7649_h=ZA7649_h %>%
+  mutate(qc1a_2 = case_when(
+    qc1a_2 ==4 ~ 1,
+    qc1a_2 ==3 ~ 2,
+    qc1a_2 ==2 ~ 3,
+    qc1a_2 ==1 ~ 4
+  ))
+ZA7649_h$qc1a_2 <- labelled(ZA7649_h$qc1a_2,
+                            c("Not at all attached" = 1,
+                              "Not very attached" = 2,
+                              "Fairly attached" = 3,
+                              "Very attached" = 4)
+                            )
+```
+
+
+### Political position
+```{r political-position-011}
+# split missing values of ESS10$lrscale
+ESS10_h=subset(ESS10_h, lrscale %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$lrscale
+ESS10_h=ESS10_h %>%
+  mutate(lrscale = case_when(
+    lrscale %in% c(0,1,2,3) ~ 1,
+    lrscale  %in% c(4,5,6,7) ~ 2,
+    lrscale  %in% c(8,9,10) ~ 3
+  ))
+ESS10_h$lrscale <- labelled(ESS10_h$lrscale,
+                            c("Left" = 1,
+                              "Centre" = 2,
+                              "Right" = 3))
+
+
+# split missing values of ZA7649$d1
+ZA7649_h=subset(ZA7649_h, d1 %in% c(1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ZA7649$d1
+ZA7649_h=ZA7649_h %>%
+  mutate(d1 = case_when(
+    d1 %in% c(1,2,3) ~ 1,
+    d1  %in% c(4,5,6,7) ~ 2,
+    d1  %in% c(8,9,10) ~ 3
+  ))
+ZA7649_h$d1 <- labelled(ZA7649_h$d1,
+                        c("Left" = 1,
+                          "Centre" = 2,
+                          "Right" = 3))
+```
+
+## Citizenship
+```{r citizenship-012}
+# split missing values of ESS10$ctzcntr
+ESS10_h=subset(ESS10_h, ctzcntr %in% c(1,2))
+
+# Recoding values and labels of ESS10$ctzcntr
+ESS10_h=ESS10_h %>%
+  mutate(ctzcntr = case_when(
+    ctzcntr == 1 ~ 1,
+    ctzcntr == 2 ~ 0
+  ))
+ESS10_h$ctzcntr <- labelled(ESS10_h$ctzcntr,
+                            c("No" = 0,
+                              "Yes" = 1))
+
+# 1. Identifica le colonne che iniziano con "q1."
+colonne_q1_names <- names(ZA7649_h)[startsWith(names(ZA7649_h), "q1.")]
+
+# 2. Crea la tabella di corrispondenza tra nomi delle nazionalità e codici ISO alpha-2
+corrispondenze_iso <- tibble(
+  nazionalita = c("BELGIUM", "DENMARK", "GERMANY", "GREECE", "SPAIN", "FRANCE",
+                  "IRELAND", "ITALY", "LUXEMBOURG", "NETHERLANDS", "PORTUGAL",
+                  "UNITED KINGDOM", "AUSTRIA", "SWEDEN", "FINLAND", "CYPRUS",
+                  "CZECH REPUBLIC", "ESTONIA", "HUNGARY", "LATVIA", "LITHUANIA",
+                  "MALTA", "POLAND", "SLOVAKIA", "SLOVENIA", "BULGARIA", "ROMANIA",
+                  "CROATIA", "TURKEY", "CYPRUS - TCC", "NORTH MACEDONIA",
+                  "MONTENEGRO", "SERBIA", "ALBANIA", "OTHER COUNTRIES", "DK"),
+  iso_alpha2 = c("BE", "DK", "DE", "GR", "ES", "FR",
+                 "IE", "IT", "LU", "NL", "PT",
+                 "GB", "AT", "SE", "FI", "CY",
+                 "CZ", "EE", "HU", "LV", "LT",
+                 "MT", "PL", "SK", "SI", "BG", "RO",
+                 "HR", "TR", "TR", "MK",
+                 "ME", "RS", "AL", NA, NA),
+  colonna_q1 = paste0("q1.", 1:36)
+)
+
+# 3. Itera attraverso le colonne q1 e crea le colonne ISO
+for (i in seq_along(colonne_q1_names)) {
+  col_q1_name <- colonne_q1_names[i]
+  etichetta <- names(ZA7649_h)[which(names(ZA7649_h) == col_q1_name)]
+
+  codice_iso <- corrispondenze_iso %>%
+    filter(colonna_q1 == etichetta) %>%
+    pull(iso_alpha2)
+
+  nuova_colonna_nome <- paste0("iso_", col_q1_name)
+
+  ZA7649_h <- ZA7649_h %>%
+    mutate(!!nuova_colonna_nome := ifelse(as.numeric(!!sym(col_q1_name)) == 1, codice_iso, NA_character_))
+}
+
+# 4. Identifica le colonne iso_q1.x
+iso_colonne <- names(ZA7649_h)[startsWith(names(ZA7649_h), "iso_q1.")]
+
+# 5. Crea la colonna ctzcntr
+ZA7649_h <- ZA7649_h %>%
+  mutate(
+    ctzcntr = case_when(
+      is.na(isocntry) ~ 0,
+      TRUE ~ as.integer(rowSums(select(., all_of(iso_colonne)) == isocntry, na.rm = TRUE) > 0)
+    )
+  )
+
+# 6. Elimina le colonne iso_q1.x e inserisci le labels
+ZA7649_h <- ZA7649_h %>%
+  select(-all_of(iso_colonne))%>%
+  set_variable_labels(
+    ctzcntr = "Country"
+  )
+
+ZA7649_h$ctzcntr <- labelled(ZA7649_h$ctzcntr,
+                            c("No" = 0,
+                              "Yes" = 1))
+
+
+
+#harmonizing countries ZA7649_h$isocntry with ESS10_h$cntry
+ZA7649_h$iso_h=ZA7649_h$isocntry
+ZA7649_h$iso_h[ZA7649_h$iso_h %in% c("DE-W" , "DE-E"  )]  = "DE"
+ZA7649_h$iso_h[ZA7649_h$iso_h %in% c("CY-TCC"  )] = 'CY'
+ZA7649_h$iso_h[ZA7649_h$iso_h %in% c("GB-NIR"  , "GB-UKM"  )] = "GB"
+
+
+# Clean Workspace
+rm(codice_iso, col_q1_name, colonne_q1_names, corrispondenze_iso, etichetta, i, iso_colonne, nuova_colonna_nome)
+
+```
+
+
+#### Selection of citizens given the small percentage of non citizens
+```{r selection-of-citizens-given-the-small-percentage-of-non-citizens-013}
+ESS10_h=subset(ESS10_h, ESS10_h$ctzcntr %in% c(1))
+print("ESS Citizenship")
+
+ZA7649_h=subset(ZA7649_h, ZA7649_h$ctzcntr %in% c(1))
+```
+
+## Filter common countries
+```{r filter-common-countries-014}
+ESS10_h <- ESS10_h %>%
+  filter(cntry %in% c("BE", "BG", "CZ", "EE", "FI", "FR",  "GR", "HR", "HU", "IE", "IT", "LT", "NL", "PT", "SI", "SK")) %>%
+  mutate(
+    Country_code = case_when(
+      cntry == "BE" ~ 1,
+      cntry == "BG" ~ 2,
+      cntry == "CZ" ~ 3,
+      cntry == "EE" ~ 4,
+      cntry == "FI" ~ 5,
+      cntry == "FR" ~ 6,
+      cntry == "GR" ~ 7,
+      cntry == "HR" ~ 8,
+      cntry == "HU" ~ 9,
+      cntry == "IE" ~ 10,
+      cntry == "IT" ~ 11,
+      cntry == "LT" ~ 12,
+      cntry == "NL" ~ 13,
+      cntry == "PT" ~ 14,
+      cntry == "SI" ~ 15,
+      cntry == "SK" ~ 16
+    ),
+    Country_code = factor(Country_code,levels = 1:16))
+
+ZA7649_h <- ZA7649_h%>%
+  filter(iso_h %in% c("BE", "BG", "CZ", "EE", "FI", "FR", "GR", "HR", "HU","IE", "IT", "LT", "NL", "PT", "SI", "SK")) %>%
+  mutate(
+    Country_code = case_when(
+      iso_h == "BE" ~ 1,
+      iso_h == "BG" ~ 2,
+      iso_h == "CZ" ~ 3,
+      iso_h == "EE" ~ 4,
+      iso_h == "FI" ~ 5,
+      iso_h == "FR" ~ 6,
+      iso_h == "GR" ~ 7,
+      iso_h == "HR" ~ 8,
+      iso_h == "HU" ~ 9,
+      iso_h == "IE" ~ 10,
+      iso_h == "IT" ~ 11,
+      iso_h == "LT" ~ 12,
+      iso_h == "NL" ~ 13,
+      iso_h == "PT" ~ 14,
+      iso_h == "SI" ~ 15,
+      iso_h == "SK" ~ 16
+    ),
+    Country_code = factor(Country_code,
+       levels = 1:16))
+```
+
+### Trust
+```{r trust-015}
+# split missing values of ESS10$trstprl
+ESS10_h=subset(ESS10_h, trstprl %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$trstprl
+ESS10_h=ESS10_h %>%
+  mutate(trstprl = case_when(
+    trstprl %in% c(0,1,2,3,4,5) ~ 0,
+    trstprl %in% c(6,7,8,9,10) ~ 1
+  ))
+ESS10_h$trstprl <- labelled(ESS10_h$trstprl,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+# split missing values of ZA7649$qa6a_10
+ZA7649_h=subset(ZA7649_h, qa6a_10 %in% c(1,2))
+
+# Recoding values and labels of ZA7649$qa6a_10
+ZA7649_h=ZA7649_h %>%
+  mutate(qa6a_10 = case_when(
+    qa6a_10 ==2 ~ 0,
+    qa6a_10 ==1 ~ 1
+  ))
+ZA7649_h$qa6a_10 <- labelled(ZA7649_h$qa6a_10,
+                             c("No Trust" = 0,
+                               "Trust" = 1))
+
+# split missing values of ESS10$trstlgl
+ESS10_h=subset(ESS10_h, trstlgl %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$trstlgl
+ESS10_h=ESS10_h %>%
+  mutate(trstlgl = case_when(
+    trstlgl %in% c(0,1,2,3,4,5) ~ 0,
+    trstlgl %in% c(6,7,8,9,10) ~ 1
+  ))
+ESS10_h$trstlgl <- labelled(ESS10_h$trstlgl,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+
+
+# split missing values of ZA7649$qa6a_3
+ZA7649_h=subset(ZA7649_h, qa6a_3 %in% c(1,2))
+
+# Recoding values and labels of ZA7649$qa6a_3
+ZA7649_h=ZA7649_h %>%
+  mutate(qa6a_3 = case_when(
+    qa6a_3 ==2 ~ 0,
+    qa6a_3 ==1 ~ 1
+  ))
+ZA7649_h$qa6a_3 <- labelled(ZA7649_h$qa6a_3,
+                             c("No Trust" = 0,
+                               "Trust" = 1))
+
+# split missing values of ESS10$trstplc
+ESS10_h=subset(ESS10_h, trstplc %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$trstplc
+ESS10_h=ESS10_h %>%
+  mutate(trstplc = case_when(
+    trstplc %in% c(0,1,2,3,4,5) ~ 0,
+    trstplc %in% c(6,7,8,9,10) ~ 1
+  ))
+ESS10_h$trstplc <- labelled(ESS10_h$trstplc,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+
+# split missing values of ZA7649$qa6a_4
+ZA7649_h=subset(ZA7649_h, qa6a_4 %in% c(1,2))
+
+# Recoding values and labels of ZA7649$qa6a_4
+ZA7649_h=ZA7649_h %>%
+  mutate(qa6a_4 = case_when(
+    qa6a_4 ==2 ~ 0,
+    qa6a_4 ==1 ~ 1
+  ))
+ZA7649_h$qa6a_4 <- labelled(ZA7649_h$qa6a_4,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+
+# split missing values of ESS10$trstprt
+ESS10_h=subset(ESS10_h, trstprt %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$trstprt
+ESS10_h=ESS10_h %>%
+  mutate(trstprt = case_when(
+    trstprt %in% c(0,1,2,3,4,5) ~ 0,
+    trstprt %in% c(6,7,8,9,10) ~ 1
+  ))
+ESS10_h$trstprt <- labelled(ESS10_h$trstprt,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+
+# split missing values of ZA7649$qa6a_2
+ZA7649_h=subset(ZA7649_h, qa6a_2 %in% c(1,2))
+
+# Recoding values and labels of ZA7649$qa6a_2
+ZA7649_h=ZA7649_h %>%
+  mutate(qa6a_2 = case_when(
+    qa6a_2 ==2 ~ 0,
+    qa6a_2 ==1 ~ 1
+  ))
+ZA7649_h$qa6a_2 <- labelled(ZA7649_h$qa6a_2,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+
+# split missing values of ESS10$trstep
+ESS10_h=subset(ESS10_h, trstep %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$trstep
+ESS10_h=ESS10_h %>%
+  mutate(trstep = case_when(
+    trstep %in% c(0,1,2,3,4,5) ~ 0,
+    trstep %in% c(6,7,8,9,10) ~ 1
+  ))
+ESS10_h$trstep <- labelled(ESS10_h$trstep,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+
+# split missing values of ZA7649$qa6a_11
+ZA7649_h=subset(ZA7649_h, qa6a_11 %in% c(1,2))
+
+# Recoding values and labels of ZA7649$qa6a_11
+ZA7649_h=ZA7649_h %>%
+  mutate(qa6a_11 = case_when(
+    qa6a_11 ==2 ~ 0,
+    qa6a_11 ==1 ~ 1
+  ))
+ZA7649_h$qa6a_11 <- labelled(ZA7649_h$qa6a_11,
+                            c("No Trust" = 0,
+                              "Trust" = 1))
+
+# split missing values of ESS10$trstun
+ESS10_h=subset(ESS10_h, trstun %in% c(0,1,2,3,4,5,6,7,8,9,10))
+
+# Recoding values and labels of ESS10$trstun
+ESS10_h=ESS10_h %>%
+  mutate(trstun = case_when(
+    trstun %in% c(0,1,2,3,4,5) ~ 0,
+    trstun %in% c(6,7,8,9,10) ~ 1
+  ))
+ESS10_h$trstun <- labelled(ESS10_h$trstun,
+                           c("No Trust" = 0,
+                             "Trust" = 1))
+
+
+# split missing values of ZA7649$qa6a_12
+ZA7649_h=subset(ZA7649_h, qa6a_12 %in% c(1,2))
+
+# Recoding values and labels of ZA7649$qa6a_12
+ZA7649_h=ZA7649_h %>%
+  mutate(qa6a_12 = case_when(
+    qa6a_12 ==2 ~ 0,
+    qa6a_12 ==1 ~ 1
+  ))
+ZA7649_h$qa6a_12 <- labelled(ZA7649_h$qa6a_12,
+                             c("No Trust" = 0,
+                               "Trust" = 1))
+```
+
+
+
+# TARGET VARIABLES
+
+## ESS latent traits
+```{r ess-latent-traits-016}
+# split missing values for items measuring latent traits
+ESS10_h=subset(ESS10_h, imsmetn !=7 & imsmetn !=8 & imsmetn !=9)
+ESS10_h=subset(ESS10_h, imdfetn !=7 & imdfetn !=8 & imdfetn !=9)
+ESS10_h=subset(ESS10_h, impcntr !=7 & impcntr !=8 & impcntr !=9)
+
+ESS10_h=subset(ESS10_h, imbgeco !=77 & imbgeco !=88 & imbgeco !=99)
+ESS10_h=subset(ESS10_h, imueclt !=77 & imueclt !=88 & imueclt !=99)
+ESS10_h=subset(ESS10_h, imwbcnt !=77 & imwbcnt !=88 & imwbcnt !=99)
+
+# Recoding values and labels of ESS10_h$imbgeco
+ESS10_h=ESS10_h %>%
+  mutate(imbgeco = case_when(
+    imbgeco %in% c(0,1) ~ 1,
+    imbgeco %in% c(2,3,4) ~ 2,
+    imbgeco %in% c(5,6,7) ~ 3,
+    imbgeco %in% c(8,9,10) ~ 4
+  ))
+
+# Recoding values and labels of ESS10_h$imueclt
+ESS10_h=ESS10_h %>%
+  mutate(imueclt = case_when(
+    imueclt %in% c(0,1) ~ 1,
+    imueclt %in% c(2,3,4) ~ 2,
+    imueclt %in% c(5,6,7) ~ 3,
+    imueclt %in% c(8,9,10) ~ 4
+  ))
+
+# Recoding values and labels of ESS10_h$imwbcnt
+ESS10_h=ESS10_h %>%
+  mutate(imwbcnt = case_when(
+    imwbcnt %in% c(0,1) ~ 1,
+    imwbcnt %in% c(2,3,4) ~ 2,
+    imwbcnt %in% c(5,6,7) ~ 3,
+    imwbcnt %in% c(8,9,10) ~ 4
+  ))
+
+```
+
+## Eurobarometer latent traits
+```{r eurobarometer-latent-traits-017}
+# split missing values for items measuring latent traits
+ZA7649_h=subset(ZA7649_h, qb5_4 !=3 & qb5_4 !=4 & qb5_4 !=9)
+ZA7649_h=subset(ZA7649_h, qb6_1 !=3 & qb6_1 !=4 & qb6_1 !=9)
+ZA7649_h=subset(ZA7649_h, qb6_2 !=3 & qb6_2 !=4 & qb6_2 !=9)
+
+ZA7649_h=subset(ZA7649_h, qb7_1 !=5  & qb7_1 !=9)
+ZA7649_h=subset(ZA7649_h, qb7_2 !=5  & qb7_2 !=9)
+ZA7649_h=subset(ZA7649_h, qb8_1 !=5  & qb8_1 !=9)
+ZA7649_h=subset(ZA7649_h, qb8_2 !=5  & qb8_2 !=9)
+```
+
+
+# Subsetting by variables
+## ESS
+```{r ess-018}
+ESS10_h_s <- ESS10_h %>%
+  select(Country=cntry,
+         Country_code=Country_code,
+         Age=agea,
+         Gender=gndr,
+         Occupation=mnactic,
+         Domicile=domicil,
+         Subjective_income=hincfel,
+         Political_Orientation=lrscale,
+         Attachment_country=atchctr,
+         Life_Satisfaction=stflife,
+         Economy_Satisfaction=stfeco,
+         Trust_Parliament=trstprl,
+         Trust_Legalsystem=trstlgl,
+         Trust_police=trstplc,
+         Trust_politicalparties=trstprt,
+         Trust_EU=trstep,
+         Trust_UN=trstun,
+         Allow_samerace=imsmetn,
+         Allow_differentrace=imdfetn,
+         Allow_poorcountries=impcntr,
+         Impact_economy=imbgeco,
+         Impact_cultural=imueclt,
+         Impact_country=imwbcnt,
+         Weights=anweight)%>%
+  mutate(
+    #   Numeriche
+    Age = as.numeric(Age),
+    Weights = as.numeric(Weights),
+
+    #   Nominali (Categoriali)
+    Country = as.factor(Country),
+    Country_code=as.factor(Country_code),
+    Gender = as.factor(Gender),
+    Occupation = as.factor(Occupation),
+    Political_Orientation = as.factor(Political_Orientation),
+    Domicile = as.factor(Domicile),
+
+    #   Ordinali (Specificando l'ordine)
+    Subjective_income = factor(Subjective_income, levels = c(1, 2), ordered = TRUE),
+    Attachment_country = factor(Attachment_country, levels = 1:4, ordered = TRUE),
+    Life_Satisfaction = factor(Life_Satisfaction, levels = 1:4, ordered = TRUE),
+    Economy_Satisfaction = factor(Economy_Satisfaction, levels = 1:4, ordered = TRUE),
+    Trust_Parliament= factor(Trust_Parliament,levels = 0:1),
+    Trust_Legalsystem=factor(Trust_Legalsystem,levels = 0:1),
+    Trust_police=factor(Trust_police,levels = 0:1),
+    Trust_politicalparties=factor(Trust_politicalparties,levels = 0:1),
+    Trust_EU=factor(Trust_EU,levels = 0:1),
+    Trust_UN=factor(Trust_UN,levels = 0:1),
+    Allow_samerace=factor(Allow_samerace, levels = 1:4, ordered = TRUE),
+    Allow_differentrace=factor(Allow_differentrace, levels = 1:4, ordered = TRUE),
+    Allow_poorcountries=factor(Allow_poorcountries, levels = 1:4, ordered = TRUE),
+    Impact_economy=factor(Impact_economy, levels = 1:4, ordered = TRUE),
+    Impact_cultural=factor(Impact_cultural, levels = 1:4, ordered = TRUE),
+    Impact_country=factor(Impact_country, levels = 1:4, ordered = TRUE),
+  )
+
+```
+
+## Eurobarometer
+```{r eurobarometer-019}
+ZA7649_h_s <- ZA7649_h %>%
+  select(Country=iso_h,
+         Country_code=Country_code,
+         Age=d11,
+         Gender=d10,
+         Occupation=d15a,
+         Domicile=d25,
+         Subjective_income=d60,
+         Political_Orientation=d1,
+         Attachment_country=qc1a_2,
+         Life_Satisfaction=d70,
+         Economy_Satisfaction=qa1a_2,
+         Trust_Parliament=qa6a_10,
+         Trust_Legalsystem=qa6a_3,
+         Trust_police=qa6a_4,
+         Trust_politicalparties=qa6a_2,
+         Trust_EU=qa6a_11,
+         Trust_UN=qa6a_12,
+         Common_policy=qb5_4,
+         Asylum_system=qb6_1,
+         External_border=qb6_2,
+         Imm_EU=qb7_1,
+         Imm_NonEU=qb7_2,
+         Im_contr=qb8_1,
+         help_refugees=qb8_2,
+         Weights=w1)%>%
+  mutate(
+    #   Numeriche
+    Age = as.numeric(Age),
+    Weights = as.numeric(Weights),
+
+    #   Nominali (Categoriali)
+    Country = as.factor(Country),
+    Country_code=as.factor(Country_code),
+    Gender = as.factor(Gender),
+    Occupation = as.factor(Occupation),
+    Political_Orientation = as.factor(Political_Orientation),
+    Domicile = as.factor(Domicile),
+
+    #   Ordinali (Specificando l'ordine)
+    Subjective_income = factor(Subjective_income, levels = c(1, 2), ordered = TRUE),
+    Attachment_country = factor(Attachment_country, levels = 1:4, ordered = TRUE),
+    Life_Satisfaction = factor(Life_Satisfaction, levels = 1:4, ordered = TRUE),
+    Economy_Satisfaction = factor(Economy_Satisfaction, levels = 1:4, ordered = TRUE),
+    Trust_Parliament= factor(Trust_Parliament,levels = 0:1),
+    Trust_Legalsystem=factor(Trust_Legalsystem,levels = 0:1),
+    Trust_police=factor(Trust_police,levels = 0:1),
+    Trust_politicalparties=factor(Trust_politicalparties,levels = 0:1),
+    Trust_EU=factor(Trust_EU,levels = 0:1),
+    Trust_UN=factor(Trust_UN,levels = 0:1),
+    Common_policy=factor(Common_policy, levels = 1:2, ordered = TRUE),
+    Asylum_system=factor(Asylum_system, levels = 1:2, ordered = TRUE),
+    External_border=factor(External_border, levels = 1:2, ordered = TRUE),
+    Imm_EU=factor(Imm_EU, levels = 1:4, ordered = TRUE),
+    Imm_NonEU=factor(Imm_NonEU, levels = 1:4, ordered = TRUE),
+    Im_contr=factor(Im_contr, levels = 1:4, ordered = TRUE),
+    help_refugees=factor(help_refugees, levels = 1:4, ordered = TRUE),
+    )
+```
+
+## COMBINED DATASET
+```{r combined-dataset-020}
+# Get common variables
+common_vars <- intersect(names(ESS10_h_s), names(ZA7649_h_s))
+# Specify the variables you want to impute
+vars_ESS <- c("Allow_samerace", "Allow_differentrace",
+         "Allow_poorcountries","Impact_economy",
+         "Impact_cultural","Impact_country")
+vars_ZA <- c("Common_policy", "Asylum_system",      "External_border","Imm_EU","Imm_NonEU","Im_contr","help_refugees")
+
+# Add missing columns to ZA7649_h_s
+for (v in vars_ESS) {
+  ZA7649_h_s[[v]] <- NA
+}
+
+# Add missing columns to ESS10
+for (v in vars_ZA) {
+  ESS10_h_s[[v]] <- NA
+}
+# Combine the full list
+all_vars <- union(common_vars, vars_ESS)
+all_vars <- union(all_vars,vars_ZA)
+# Subset the datasets
+ess_data <- ESS10_h_s[, all_vars]
+za_data  <- ZA7649_h_s[, all_vars]
+ess_data$source <- "ESS"
+za_data$source  <- "ZA"
+
+# Combine into one dataset
+combined_data <- rbind(ess_data, za_data)%>%
+ mutate(
+    Common_policy=factor(Common_policy, levels = 1:2, ordered = TRUE),
+    Asylum_system=factor(Asylum_system, levels = 1:2, ordered = TRUE),
+    External_border=factor(External_border, levels = 1:2, ordered = TRUE),
+    Imm_EU=factor(Imm_EU, levels = 1:4, ordered = TRUE),
+    Imm_NonEU=factor(Imm_NonEU, levels = 1:4, ordered = TRUE),
+    Im_contr=factor(Im_contr, levels = 1:4, ordered = TRUE),
+    help_refugees=factor(help_refugees, levels = 1:4, ordered = TRUE),
+    )
+
+rm(v,za_data,ess_data)
+
+```
+
+```{r remove-data-021}
+rm(ESS10)
+rm(ESS10_h)
+rm(ZA7649)
+rm(ZA7649_h)
+
+```
+
+## ########### LATENT TRAIT ESTIMATION ##########################
+
+## LATENT COMMON TRAIT - TRUST - unidimensional IRT model
+
+```{r latent-common-trait-trust-unidimensional-irt-model-022}
+data_trust <- as.matrix(cbind(
+  combined_data$Trust_Parliament,
+  combined_data$Trust_Legalsystem,
+  combined_data$Trust_police,
+  combined_data$Trust_politicalparties,
+  combined_data$Trust_EU,
+  combined_data$Trust_UN
+))
+colnames(data_trust)=c("Trust_Parliament","Trust_Legalsystem","Trust_police","Trust_politicalparties","Trust_EU","Trust_UN")
+```
+
+#### Configural Invariant model
+```{r configural-invariance-023}
+mod_configural_trust=multipleGroup(data_trust,model = 1,group = combined_data$Country,itemtype = "graded",NCYCLES=1000, verbose=F)
+```
+
+```{r configural-invariance-024}
+combined_data= cbind(combined_data,fscores(mod_configural_trust))
+names(combined_data)[names(combined_data) == "F1"] <- "TRUST"
+```
+
+
+```{r configural-invariance-025}
+par(mfrow = c(1, 2))
+hist(combined_data$TRUST[combined_data$source=="ESS"],breaks = 20, main = "ESS TRUST", xlab = "trust", col = "lightblue")
+hist(combined_data$TRUST[combined_data$source=="ZA"],breaks = 20, main = "EUROBAROMETER TRUST", xlab = "trust", col = "salmon")
+
+rm(dataESS,dataESS_sorted,dataEUR,dataEUR_sorted)
+
+```
+
+
+# TARGET VARIABLES - bidimensiona IRT model
+#### ALLOWING IMMIGRANTS: _Higher values indicate greater opposition towards immigrants_ - Immigrant Acceptance-Restriction Scale
+* Allow many/few immigrants of same race/ethnic group as majority
+* Allow many/few immigrants of different race/ethnic group from majority	* Allow many/few immigrants from poorer countries outside Europe
+
+#### OPINION ON IMMIGRANTS: _Higher values indicate more positive opinion_ -Immigrant Contribution Perception
+* Immigration bad or good for country's economy
+* Country's cultural life undermined or enriched by immigrants
+* Immigrants make country worse or better place to live
+
+```{r opinion-on-immigrants-026}
+data_AF <- as.matrix(cbind(
+  combined_data$Allow_samerace,
+  combined_data$Allow_differentrace,
+  combined_data$Allow_poorcountries,
+  combined_data$Impact_economy,
+  combined_data$Impact_cultural,
+  combined_data$Impact_country
+))
+
+data_AF<-data_AF[combined_data$source=="ESS",]
+colnames(data_AF)=c("Allow_samerace","Allow_differentrace","Allow_poorcountries","Impact_economy","Impact_cultural","Impact_country")
+
+modelAF <- '
+Allow = 1-3
+Feeling = 4-6
+COV = Allow*Feeling
+'
+```
+
+#### Configural Invariant model
+```{r configural-invariance-027}
+mod_configural_AF=multipleGroup(data_AF,model = modelAF,group = combined_data$Country[combined_data$source=="ESS"],itemtype = "graded",method='MHRM', verbose=T)
+#summary(mod_configural_AF)
+```
+
+
+```{r configural-invariance-028}
+combined_data= cbind(combined_data,rbind(fscores(mod_configural_AF),matrix(NA,dim(combined_data)[1]-dim(data_AF)[1],2)))
+names(combined_data)[names(combined_data) == "Allow"] <- "ALLOW"
+names(combined_data)[names(combined_data) == "Feeling"] <- "FEELING"
+```
+
+```{r configural-invariance-029}
+par(mfrow = c(1, 2))
+
+hist(combined_data$ALLOW[combined_data$source=="ESS"],breaks = 20, main = "ESS Allow scale", xlab = "allow", col = "red")
+hist(combined_data$FEELING[combined_data$source=="ESS"],breaks = 20, main = "ESS Opinion scale", xlab = "opinion", col = "darkgreen")
+
+```
+
+
+
+## Eurobarometer latent traits - unidimensional IRT models
+
+#### OPINION ON COMMON EU POLICIES ON IMMIGRATION (to correlate with imputed traits from ESS): _Higher values indicate higher acceptance of a common policy_
+What is your opinion on each of the following statements? Please tell me for each statement, whether you are for it or against it.
+* A common European policy on migration	EU PROPOSALS
+* A common European Asylum system	EU PROPOSALS
+* A reinforcement of EU external borders with more European border guards and coast guards	EU PROPOSALS
+
+```{r opinion-on-common-eu-policies-on-immigration-030}
+data_policy <- cbind(
+  combined_data$Common_policy,
+  combined_data$Asylum_system,
+  combined_data$External_border
+)
+data_policy<-data_policy[combined_data$source=="ZA",]
+colnames(data_policy) <- c("Common_policy", "Asylum_system", "External_border")
+```
+
+#### Configural Invariant model
+```{r configural-invariance-031}
+mod_configural_policy=multipleGroup(data_policy,model = 1,group = combined_data$Country[combined_data$source=="ZA"],itemtype = "graded",NCYCLES=1000, verbose=F)
+```
+
+```{r configural-invariance-032}
+combined_data= cbind(combined_data,rbind(matrix(NA,dim(combined_data)[1]-dim(data_policy)[1],1),fscores(mod_configural_policy)))
+names(combined_data)[names(combined_data) == "F1"] <- "COMMONPOLICY"
+
+```
+
+
+#### OPINION ON IMMIGRATION (control variable): lower values indicate more positive opinion
+Please tell me whether each of the following statements evokes a positive or negative feeling for you?
+* Immigration of people from other EU Member States
+* Immigration of people from outside the EU
+
+For each of the following statements, please tell me whether you totally agree, tend to agree, tend to disagree or totally disagree.
+* Immigrants contribute a lot to (OUR COUNTRY)
+* (OUR COUNTRY) should help refugees
+
+```{r opinion-on-immigration-033}
+data_feeling <- cbind(
+  combined_data$Imm_EU,
+  combined_data$Imm_NonEU,
+  combined_data$Im_contr,
+  combined_data$help_refugees
+)
+data_feeling<-data_feeling[combined_data$source=="ZA",]
+colnames(data_feeling) <- c("Imm_EU", "Imm_NonEU", "Im_contr","help_refugees")
+```
+
+#### Configural Invariant model
+```{r configural-invariance-034}
+mod_configural_feeling=multipleGroup(data_feeling,model = 1,group = combined_data$Country[combined_data$source=="ZA"],itemtype = "graded",NCYCLES=1000, verbose=F)
+```
+
+```{r configural-invariance-035}
+#summary(mod_configural_feeling)
+combined_data= cbind(combined_data,rbind(matrix(NA,dim(combined_data)[1]-dim(data_feeling)[1],1),fscores(mod_configural_feeling)))
+names(combined_data)[names(combined_data) == "F1"] <- "FEELING_ZA"
+
+```
+
+```{r configural-invariance-036}
+par(mfrow = c(1, 2))
+
+hist(combined_data$COMMONPOLICY[combined_data$source=="ZA"],breaks = 20, main = "Eurobarometer: Policy scale", xlab = "common policy", col = "red")
+hist(combined_data$FEELING_ZA[combined_data$source=="ZA"],breaks = 30, main = "Eurobarometer: Opinion scale", xlab = "trust", col = "darkgreen")
+
+
+```
+
+
+# Clean Workspace
+```{r clean-workspace-037}
+rm(data_AF, data_trust, data_policy, data_feeling,ESS10_h_s,ZA7649_h_s, all_vars,common_vars,modelAF,vars_ESS,vars_ZA)
+```
+
+```{r clean-workspace-038}
+save.image("h_ENCLOSE_data_for_statmatch_imp.RData")
+```

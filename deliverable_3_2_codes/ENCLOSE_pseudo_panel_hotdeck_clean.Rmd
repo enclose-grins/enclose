@@ -1,0 +1,343 @@
+---
+title: "Enclose: Pseudo-panel creation -Hot-Deck Matching via Gower Distance"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width=7, fig.height=5
+)
+# Load libraries
+library(dplyr)
+library(cluster)
+library(writexl)
+library(ggplot2)
+library(purrr)
+library(tibble)
+
+```
+
+## 1. Load and Prepare Data
+
+```{r data-loading}
+# Load your data panel
+load("h_ENCLOSE_data_panel_latenttraits_configural.RData")
+rm(list = setdiff(ls(), c("data", "countries")))
+
+# Keep only needed variables
+vars_to_keep <- c(
+  "Country","Age","Gender","Domicile","Occupation",
+  "Marital_status","Education","Interested_politics",
+  "Political_position","Discriminated_group","Subjective_income",
+  "Religious","Happy","Life_satisfaction","Voted",
+  "Attachment_country","Attachment_EU",
+  "TRUST_PEOPLE","POLITICAL_PARTECIPATION",
+  "HSV_CONSERVATION","HSV_OPENNESS","HSV_ENHANCEMENT",
+  "HSV_TRANSCENDENCE","source","TRUST_INSTITUTION","SATISFACTION"
+)
+data <- data[, vars_to_keep]
+data$country_code <- factor(data$Country, levels = sort(unique(data$Country)))
+
+# Split donors and recipients
+data9  <- data %>% filter(source == "data9")
+data11 <- data %>% filter(source == "data11")
+
+data9=data[data$source=="data9",]
+data11=data[data$source=="data11",]
+
+```
+
+## 2. Define Matching Variables and IDs
+
+```{r define-matching-vars}
+# Add unique IDs
+data9  <- data9  %>% mutate(id9  = row_number())
+data11 <- data11 %>% mutate(id11 = row_number())
+
+# Exclude outcomes and identifiers for matching
+match_vars <- setdiff(
+  names(data9),
+  c("Country","source","TRUST_INSTITUTION","SATISFACTION",
+    "Sample_weight","id9","id11","country_code")
+)
+```
+
+## 3. Nearest-Neighbor Matching by Country
+
+```{r hotdeck-matching}
+# Prepare container
+matched_list <- list()
+
+# Loop through each country
+for(cntry in unique(data$Country)){
+  message("Matching for country: ", cntry)
+  
+  # Subset donor/recipient
+  d9  <- data9  %>% filter(Country == cntry)
+  d11 <- data11 %>% filter(Country == cntry)
+  
+  if(nrow(d9)==0 || nrow(d11)==0) next
+  
+  # Extract only matching covariates
+  d9m  <- d9  %>% select(all_of(match_vars)) %>% as.data.frame()
+  d11m <- d11 %>% select(all_of(match_vars)) %>% as.data.frame()
+  
+  # Compute Gower distance
+  gdist <- daisy(rbind(d11m, d9m), metric = "gower")
+  mat   <- as.matrix(gdist)[1:nrow(d11m), (nrow(d11m)+1):nrow(as.matrix(gdist))]
+  
+  # Find nearest neighbor
+  nn <- apply(mat, 1, which.min)
+  
+  matched_list[[cntry]] <- tibble(
+    Country = cntry,
+    id11    = d11$id11,
+    id9     = d9$id9[nn]
+  )
+}
+rm(d11,d9,d11m,d9m,mat,nn,cntry)
+```
+
+## 4. Combine Matches and Donate Values
+
+```{r donate-values}
+# Combine all matches
+match_table <- bind_rows(matched_list)
+
+# Left join donor values into data11
+data11_matched <- data11 %>%
+  left_join(match_table, by = "id11") %>%
+  left_join(
+    data9 %>% select(id9, TRUST_2018 = TRUST_INSTITUTION,
+                     SATISFACTION_2018 = SATISFACTION),
+    by = "id9"
+  ) %>%
+  rename(
+    TRUST_donated       = TRUST_2018,
+    SATISFACTION_donated = SATISFACTION_2018
+  )
+
+# Inspect
+glimpse(data11_matched)
+```
+
+```{r,warning=F}
+save.image("ENCLOSE_pseudopanel_hotdeck.RData")
+```
+
+## PLOTS
+```{r build-hotdeck-long, message=FALSE, warning=FALSE}
+# 1) Original 2018 values from data9
+original_hotdeck <- data9 %>%
+  select(country_code, value = SATISFACTION) %>%
+  mutate(source = "Original 2018")
+
+# 2) Hot‐deck imputed 2018 values in data11_matched
+imputed_hotdeck <- data11_matched %>%
+  select(country_code, value = SATISFACTION_donated) %>%
+  mutate(source = "Hotdeck 2018")
+
+# 3) Combine into one data frame for plotting
+plot_df_sat_hd <- bind_rows(original_hotdeck, imputed_hotdeck)
+plot_df_sat_hd$source <- factor(plot_df_sat_hd$source,
+                    levels = c("Original 2018", "Hotdeck 2018"))
+```
+
+```{r plot-hotdeck-satisfaction, fig.width=10, fig.height=8, dpi=300}
+png("density_SATISFACTION_hotdeck.png", width = 3000, height = 2000, res = 300)
+ggplot(plot_df_sat_hd, aes(x = value, color = source, group = source)) +
+  geom_density(size = 0.6, alpha = 0.7) +
+  facet_wrap(~ country_code, scales = "free", ncol = 6) +
+  scale_color_manual(
+    values = c("Original 2018" = "red", "Hotdeck 2018" = "magenta")
+  ) +
+  labs(
+    x = "Satisfaction (2018)",
+    y = "Density",
+    color = ""
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+dev.off()
+
+# Include the figure in the output
+knitr::include_graphics("density_SATISFACTION_hotdeck.png")
+```
+
+
+```{r build-hotdeck-long-trust, message=FALSE, warning=FALSE}
+# 1) Original 2018 trust
+original_hd_trust <- data9 %>%
+  select(country_code, value = TRUST_INSTITUTION) %>%
+  mutate(source = "Original 2018")
+
+# 2) Hot‐deck imputed trust
+imputed_hd_trust <- data11_matched %>%
+  select(country_code, value = TRUST_donated) %>%
+  mutate(source = "Hotdeck 2018")
+
+# 3) Combine
+plot_df_trust_hd <- bind_rows(original_hd_trust, imputed_hd_trust)
+plot_df_trust_hd$source <- factor(plot_df_trust_hd$source,
+                    levels = c("Original 2018", "Hotdeck 2018"))
+```
+
+```{r plot-hotdeck-trust, fig.width=10, fig.height=8, dpi=300}
+png("density_TRUST_hotdeck.png", width = 3000, height = 2000, res = 300)
+ggplot(plot_df_trust_hd, aes(x = value, color = source, group = source)) +
+  geom_density(size = 0.6, alpha = 0.7) +
+  facet_wrap(~ country_code, scales = "free", ncol = 6) +
+  scale_color_manual(
+    values = c("Original 2018" = "red", "Hotdeck 2018" = "magenta")
+  ) +
+  labs(
+    x = "Trust in Institutions (2018)",
+    y = "Density",
+    color = ""
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+dev.off()
+
+knitr::include_graphics("density_TRUST_hotdeck.png")
+```
+
+# comparisong 2018-2023
+
+```{r build-hotdeck-long, message=FALSE, warning=FALSE}
+# 1)  2023 values from data11
+original_data <- data11 %>%
+  select(country_code, value = SATISFACTION) %>%
+  mutate(source = "Original 2023")
+
+# 2) Hot‐deck imputed 2018 values in data11_matched
+imputed_hotdeck <- data11_matched %>%
+  select(country_code, value = SATISFACTION_donated) %>%
+  mutate(source = "Hotdeck 2018")
+
+# 3) Combine into one data frame for plotting
+plot_df_sat_hd <- bind_rows(original_data, imputed_hotdeck)
+```
+
+
+```{r plot-hotdeck-satisfaction, fig.width=10, fig.height=8, dpi=300}
+library(ggplot2)
+
+png("density_SATISFACTION_1823_hotdeck.png", width = 3000, height = 2000, res = 300)
+ggplot(plot_df_sat_hd, aes(x = value, color = source, group = source)) +
+  geom_density(size = 0.6, alpha = 0.7) +
+  facet_wrap(~ country_code, scales = "free", ncol = 6) +
+  scale_color_manual(
+    values = c("Original 2023" = "blue", "Hotdeck 2018" = "magenta")
+  ) +
+  labs(
+    x = "Satisfaction",
+    y = "Density",
+    color = ""
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+dev.off()
+
+# Include the figure in the output
+knitr::include_graphics("density_SATISFACTION_1823_hotdeck.png")
+```
+
+
+```{r build-hotdeck-long-trust, message=FALSE, warning=FALSE}
+# 1) 2023 values from data11
+original_data <- data11 %>%
+  select(country_code, value = TRUST_INSTITUTION) %>%
+  mutate(source = "Original 2023")
+
+# 2) Hot‐deck imputed trust
+imputed_hd_trust <- data11_matched %>%
+  select(country_code, value = TRUST_donated) %>%
+  mutate(source = "Hotdeck 2018")
+
+# 3) Combine
+plot_df_trust_hd <- bind_rows(original_data, imputed_hd_trust)
+
+```
+
+
+```{r plot-hotdeck-trust, fig.width=10, fig.height=8, dpi=300}
+png("density_TRUST_1823_hotdeck.png", width = 3000, height = 2000, res = 300)
+ggplot(plot_df_trust_hd, aes(x = value, color = source, group = source)) +
+  geom_density(size = 0.6, alpha = 0.7) +
+  facet_wrap(~ country_code, scales = "free", ncol = 6) +
+  scale_color_manual(
+    values = c("Original 2023" = "blue", "Hotdeck 2018" = "magenta")
+  ) +
+  labs(
+    x = "Trust in Institutions",
+    y = "Density",
+    color = ""
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+dev.off()
+
+knitr::include_graphics("density_TRUST_1823_hotdeck.png")
+```
+
+# Significance of Mean Change via Hot‐Deck (One‐sample t‐test)
+```{r hotdeck-significance, echo=TRUE, message=FALSE, warning=FALSE}
+
+# Helper to categorize p‐values
+sig_level <- function(p) {
+  case_when(
+    p < 0.01 ~ "p<.01",
+    p < 0.05 ~ "p<.05",
+    p < 0.10 ~ "p<.10",
+    TRUE     ~ "ns"
+  )
+}
+
+# Compute per‐country t‐tests on the difference
+results_hd <- data11_matched %>%
+  group_by(country_code) %>%
+  summarise(
+    # run t.test on the vector of differences
+    res_sat   = list(t.test(SATISFACTION - SATISFACTION_donated)),
+    res_trust = list(t.test(TRUST_INSTITUTION - TRUST_donated))
+  ) %>%
+  mutate(
+    # extract stats for Satisfaction
+    mean_diff_sat   = map_dbl(res_sat,   ~ .x$estimate),
+    ci_low_sat      = map_dbl(res_sat,   ~ .x$conf.int[1]),
+    ci_high_sat     = map_dbl(res_sat,   ~ .x$conf.int[2]),
+    p_sat           = map_dbl(res_sat,   ~ .x$p.value),
+    sig_sat         = map_chr(res_sat,   ~ sig_level(.x$p.value)),
+    # extract stats for Trust
+    mean_diff_trust = map_dbl(res_trust, ~ .x$estimate),
+    ci_low_trust    = map_dbl(res_trust, ~ .x$conf.int[1]),
+    ci_high_trust   = map_dbl(res_trust, ~ .x$conf.int[2]),
+    p_trust         = map_dbl(res_trust, ~ .x$p.value),
+    sig_trust       = map_chr(res_trust, ~ sig_level(.x$p.value))
+  ) %>%
+  select(
+    country_code,
+    mean_diff_sat,   ci_low_sat,   ci_high_sat,   p_sat,   sig_sat,
+    mean_diff_trust, ci_low_trust, ci_high_trust, p_trust, sig_trust
+  ) %>%
+  ungroup()
+
+# Print table
+knitr::kable(
+  results_hd,
+  digits = 3,
+  col.names = c(
+    "Country",
+    "ΔSat", "CI low", "CI high", "p-Sat", "Signif",
+    "ΔTrust", "CI low", "CI high", "p-Trust", "Signif"
+  ),
+  caption = "Hot-decked mean change (2018→2023) with significance by country"
+)
+
+# Save to Excel
+write_xlsx(results_hd, "hotdeck_change_significance_by_country.xlsx")
+```

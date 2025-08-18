@@ -1,0 +1,374 @@
+---
+title: "MIDAS_distances"
+output: html_document
+date: "2025-08-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r}
+
+################### distanze distribuzioni
+print(getwd())
+load("Rmidas_ENV.RData")
+m=10
+library(StatMatch)
+library(mice)
+library(miceadds) 
+library(dplyr)
+library(writexl)
+library(openxlsx)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(stats) 
+
+
+distribution_distances <- function(data_long, variable, 
+                            method_name, bins = 50) 
+  {
+  results <- list()
+  
+  # Extract observed data (original, non-imputed)
+  obs <- data_long %>% filter(.imp == 0 & source=="ESS")
+ 
+  # Loop over imputations
+  for (i in unique(data_long$.imp)) {
+    if (i == 0) next  # skip original data
+    
+    imp <- data_long %>% filter(.imp == i & source=="ZA") 
+    sm <- comp.cont(obs, imp, xlab.A = variable, xlab.B = variable, 
+                    w.A = NULL, w.B = NULL, ref = FALSE)
+   
+    # Store results
+    results[[paste0(method_name, "_", i)]] <- data.frame(
+      method = method_name,
+      imputation = i,
+      HD=sm[[4]][3],
+      Overlap = sm[[4]][2]
+    )
+  }
+  return(bind_rows(results))
+}
+
+
+
+completed_data_midas_long=combined_data_or [,colnames(combined_data_or) %in% c("source","Country_code","Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                                                                         "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,                                                           "Economy_Satisfaction" , "TRUST","ALLOW","FEELING")]
+for(i in 1:m){
+  completed_data_midas_long=rbind(completed_data_midas_long, data.frame(combined_data_or [,colnames(combined_data_or) %in% c("source","Country_code","Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                                                                                                                       "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,
+                                                                                                                       "Economy_Satisfaction" , "TRUST")],"ALLOW"=imputations[[i]]$ALLOW,"FEELING"=imputations[[i]]$FEELING))
+}
+
+completed_data_midas_long$.id=as.character(1:nrow(completed_data_midas_long))
+completed_data_midas_long$.imp=rep(0:10,each=nrow(combined_data_or))
+dist__allow <- distribution_distances(completed_data_midas_long, 
+                                      "ALLOW", "Midas")
+dist__feeling <- distribution_distances(completed_data_midas_long, 
+                                              "FEELING", "Midas")
+
+distance_results_allow <- dist__allow
+
+summary_table_distances_allow <- distance_results_allow %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  )
+
+summary_table_distances_allow
+
+
+distance_results_feeling <- dist__feeling
+summary_table_distances_feeling <- distance_results_feeling %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  )
+
+summary_table_distances_feeling
+
+
+
+# Combine distance results
+distance_results_allow$Variable <- "Immigration rejection"
+distance_results_feeling$Variable <- "Perceived benefits of immigration"
+combined_distances <- rbind(distance_results_allow, 
+                            distance_results_feeling)
+
+write.csv(combined_distances)
+```
+
+```{r, fig.width=8, fig.height=4, dpi=300}
+png("miceHD.png", width = 2000, height = 1200, res = 300)
+combined_distances %>%
+  pivot_longer(cols = c(HD),names_to = "Metric", values_to = "Value") %>%
+  ggplot(aes(x = method, y = Value, fill = method)) +
+  geom_boxplot() +
+  facet_grid(Metric ~ Variable, scales = "free_y", space = "free_y") +  
+  theme_minimal() +
+  labs(title = "Hellinger distance",
+       x = "Imputation Method", y = "Distance") +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 8, face = "bold"),  
+    strip.background = element_rect(fill = "lightgray", color = "black", size = 1),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.major = element_line(color = "gray", linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(2, "lines")  
+  )
+dev.off()
+knitr::include_graphics("miceHD.png")
+```
+
+```{r, fig.width=8, fig.height=4, dpi=300}
+png("miceOverlap.png", width = 2000, height = 1200, res = 300)
+combined_distances %>%
+  pivot_longer(cols = c(Overlap),names_to = "Metric", values_to = "Value") %>%
+  ggplot(aes(x = method, y = Value, fill = method)) +
+  geom_boxplot() +
+  facet_grid(Metric ~ Variable, scales = "free_y", space = "free_y") +
+  theme_minimal() +
+  labs(title = "Overlap measure",
+       x = "Imputation Method", y = "Overlap") +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 8, face = "bold"),  
+    strip.background = element_rect(fill = "lightgray", color = "black", size = 1),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.major = element_line(color = "gray", linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(2, "lines")  
+  )
+dev.off()
+knitr::include_graphics("miceOverlap.png")
+```
+
+
+
+```{r}
+
+
+completed_data_midas_long_c=list()
+for( j in 1:16){
+  
+  completed_data_midas_long=combined_data_or [combined_data_or$Country_code==j,colnames(combined_data_or) %in% c("source","Country_code","Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                                                                           "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,                                                           "Economy_Satisfaction" , "TRUST","ALLOW","FEELING")]
+  for(i in 1:m){
+    completed_data_midas_long=rbind(completed_data_midas_long, data.frame(combined_data_or [ combined_data_or$Country_code==j,colnames(combined_data_or) %in% c("source","Country_code","Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                                                                                                                         "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,
+                                                                                                                         "Economy_Satisfaction" , "TRUST")],"ALLOW"=imputations_c[[j]][[i]]$ALLOW,"FEELING"=imputations_c[[j]][[i]]$FEELING))
+  }
+  
+  completed_data_midas_long$.id=as.character(1:nrow(completed_data_midas_long))
+  completed_data_midas_long$.imp=rep(0:10,each=nrow(combined_data_or[combined_data_or$Country_code==j,]))
+  
+  completed_data_midas_long_c[[j]]=completed_data_midas_long
+}
+
+
+
+
+
+
+
+
+
+
+
+summary_dist_country_allow=matrix(NA,16,2)
+for (j in 1:16){
+  dist_midas <- distribution_distances(completed_data_midas_long_c[[j]], "ALLOW", "Midas")
+  
+  dist_allow <- dist_midas
+  summary_dist_country_allow[j,] <-as.numeric(dist_allow %>%
+                                                group_by(method) %>%
+                                                summarise(
+                                                  HD=mean(HD, na.rm = TRUE),
+                                                  Overlap = mean(Overlap, na.rm = TRUE)
+                                                ) %>%
+                                                pivot_wider(
+                                                  names_from = method,
+                                                  values_from = c(HD,Overlap),
+                                                  names_glue = "{.value}_{method}"
+                                                ))
+  
+  #rm(dist_2lnorm,dist_2lpan,dist_2lpan_rs,dist_2lpmm,dist_allow)
+}
+
+rownames(summary_dist_country_allow)=country
+colnames(summary_dist_country_allow)=
+  c("MidasHD",    "MidasOverlap")
+
+summary_dist_country_allow
+
+
+
+summary_dist_country_feeling=matrix(NA,16,2)
+for (j in 1:16){
+  dist_midas <- distribution_distances(completed_data_midas_long_c[[j]], "FEELING", "Midas")
+
+  dist_feeling <- dist_midas
+  summary_dist_country_feeling[j,] <-as.numeric(dist_feeling %>%
+                                                  group_by(method) %>%
+                                                  summarise(
+                                                    HD=mean(HD, na.rm = TRUE),
+                                                    Overlap = mean(Overlap, na.rm = TRUE)
+                                                  ) %>%
+                                                  pivot_wider(
+                                                    names_from = method,
+                                                    values_from = c(HD,Overlap),
+                                                    names_glue = "{.value}_{method}"
+                                                  ))
+  
+  #rm(dist_2lnorm,dist_2lpan,dist_2lpan_rs,dist_2lpmm,dist_feeling)
+}
+
+rownames(summary_dist_country_feeling)=country
+colnames(summary_dist_country_feeling)=
+  c("MidasHD","MidasOverlap")
+
+summary_dist_country_feeling
+
+write.csv(summary_dist_country_feeling,file='dist_coutry_feeling.csv',row.names = TRUE)
+write.csv(summary_dist_country_allow,file='dist_coutry_allow.csv',row.names = TRUE)
+
+```
+
+
+
+```{r}
+completed_data_midas_long=combined_data_or [,colnames(combined_data_or) %in% c("source","Country_code","Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                                                                         "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,                                                           "Economy_Satisfaction" , "TRUST","ALLOW","FEELING")]
+for(i in 1:m){
+  completed_data_midas_long=rbind(completed_data_midas_long, data.frame(combined_data_or [,colnames(combined_data_or) %in% c("source","Country_code","Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                                                                                                                       "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,
+                                                                                                                       "Economy_Satisfaction" , "TRUST")],"ALLOW"=imputations[[i]]$ALLOW,"FEELING"=imputations[[i]]$FEELING))
+}
+
+completed_data_midas_long$.id=as.character(1:nrow(completed_data_midas_long))
+completed_data_midas_long$.imp=rep(0:10,each=nrow(combined_data_or))
+
+## conditional distribution on covariates
+
+# List of common variables to loop through
+common_variables <- c("Gender", "Occupation", "Domicile", 
+                      "Subjective_income", "Political_Orientation",
+                      "Attachment_country", 
+                      "Life_Satisfaction", "Economy_Satisfaction")
+
+# Calculate the total number of rows based on the levels of each variable
+num_rows <- sum(sapply(common_variables, function(var)
+  length(unique(completed_data_midas_long[[var]]))))
+
+
+
+
+summary_dist_allow <- matrix(NA, num_rows, 2)
+row_counter <- 1
+
+# Loop through each variable
+for (i in 1:length(common_variables)) {
+  # Get the levels of the current variable
+  levels_variable <- unique(completed_data_midas_long[[common_variables[i]]])
+  
+  # Loop through the levels of the current variable
+  for (j in levels_variable) {
+    dist_midsas <- distribution_distances(completed_data_midas_long
+                                          [completed_data_midas_long[[common_variables[i]]] == j, ], "ALLOW", "Midas")
+    
+    dist_allow <- dist_midsas
+    summary_dist_allow[row_counter,] <-as.numeric(dist_allow %>%
+                                                    group_by(method) %>%
+                                                    summarise(
+                                                      HD=mean(HD, na.rm = TRUE),
+                                                      Overlap = mean(Overlap, na.rm = TRUE)
+                                                    ) %>%
+                                                    pivot_wider(
+                                                      names_from = method,
+                                                      values_from = c(HD,Overlap),
+                                                      names_glue = "{.value}_{method}"
+                                                    )) 
+    # Increase row counter
+    row_counter <- row_counter + 1
+    
+    #rm(dist_2lnorm, dist_2lpan, dist_2lpan_rs, dist_2lpmm, dist_allow)
+  }
+}
+
+# Assign row names as the combination of variables and their levels
+row_names <- unlist(lapply(common_variables, function(var) {
+  levels_var <- unique(completed_data_midas_long[[var]])
+  paste(var, levels_var, sep = ": ")
+}))
+
+rownames(summary_dist_allow) <- row_names
+colnames(summary_dist_allow)=c("MidasHD",
+                               "MidasOverlap")
+summary_dist_allow
+
+
+
+summary_dist_feeling <- matrix(NA, num_rows, 2)
+row_counter <- 1
+
+# Loop through each variable
+for (i in 1:length(common_variables)) {
+  # Get the levels of the current variable
+  levels_variable <- unique(completed_data_midas_long[[common_variables[i]]])
+  
+  # Loop through the levels of the current variable
+  for (j in levels_variable) {
+    dist_midas <- distribution_distances(completed_data_midas_long
+                                          [completed_data_midas_long[[common_variables[i]]] == j, ], "FEELING", "Midas")
+      dist_feeling <- dist_midas
+    summary_dist_feeling[row_counter,] <-as.numeric(dist_feeling %>%
+                                                      group_by(method) %>%
+                                                      summarise(
+                                                        HD=mean(HD, na.rm = TRUE),
+                                                        Overlap = mean(Overlap, na.rm = TRUE)
+                                                      ) %>%
+                                                      pivot_wider(
+                                                        names_from = method,
+                                                        values_from = c(HD,Overlap),
+                                                        names_glue = "{.value}_{method}"
+                                                      )) 
+    # Increase row counter
+    row_counter <- row_counter + 1
+    # Remove temporary variables
+    #rm(dist_2lnorm, dist_2lpan, dist_2lpan_rs, dist_2lpmm, dist_feeling)
+  }
+}
+
+# Assign row names as the combination of variables and their levels
+row_names <- unlist(lapply(common_variables, function(var) {
+  levels_var <- unique(completed_data_midas_long[[var]])
+  paste(var, levels_var, sep = ": ")
+}))
+
+rownames(summary_dist_feeling) <- row_names
+colnames(summary_dist_feeling)=c("MidasHD",
+                                 "MidasOverlap")
+
+rownames(summary_dist_feeling) <- row_names
+summary_dist_feeling
+
+
+# write.xlsx(list(distance_country_Allow = summary_dist_country_allow,
+#                 distance_country_Feeling = summary_dist_country_feeling,
+#                 distance_covariate_allow=summary_dist_allow,
+#                 distance_covariate_feeling=summary_dist_feeling
+# ), file = "mice_distance.xlsx", rowNames = TRUE)
+
+write.csv(summary_dist_feeling,file='dist_coutry_feeling_conditioned.csv',row.names = TRUE)
+write.csv(summary_dist_allow,file='dist_coutry_allow_conditioned.csv',row.names = TRUE)
+
+```

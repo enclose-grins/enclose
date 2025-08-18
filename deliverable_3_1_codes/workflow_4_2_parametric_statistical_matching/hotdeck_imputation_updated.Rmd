@@ -1,0 +1,1280 @@
+---
+title: "Non-Parametric Imputation with StatMatch"
+author: "Based on GRINS Report - Section 4.1.1"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    theme: united
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+options(error = browser) # Uncomment this line for interactive debugging when an error occurs
+```
+
+# Introduction
+This R Markdown document implements non-parametric imputation using the StatMatch package in R. The goal is to impute the target variables ALLOW and FEELING from the donor dataset ESS (ESS10) to the recipient dataset Eurobarometer (ZA7649). The matching is performed for subgroups defined by the Country variable.
+
+# 1. Loading Packages and Data
+
+#load packages
+```{r}
+# Necessary packages
+library(StatMatch)
+library(dplyr)
+library(cluster)
+```
+
+#load data
+```{r}
+
+# Load the RData file which should contain 'combined_data'
+load("ENCLOSE_harmonized_data.RData") 
+
+# Verify combined_data exists
+if (!exists("combined_data")) {
+  stop("The object 'combined_data' was not found after loading h_ENCLOSE_data_for_statmatch_imp.RData. Please check the .RData file.")
+}
+if (!"source" %in% names(combined_data)) {
+  stop("The 'combined_data' dataframe must contain a 'source' column to distinguish donor and recipient.")
+}
+
+# Create donor and recipient datasets from combined_data
+donor_data <- combined_data %>% 
+  filter(source == "ESS")
+
+recipient_data <- combined_data %>% 
+  filter(source == "ZA")
+
+# Verify that donor and recipient data have been created and are not empty
+if (nrow(donor_data) == 0) {
+  stop("Donor dataset (source == 'ESS') is empty. Check 'combined_data'.")
+}
+if (nrow(recipient_data) == 0) {
+  stop("Recipient dataset (source == 'ZA') is empty. Check 'combined_data'.")
+}
+
+# As per user information, ALLOW and FEELING are already NA for recipient in combined_data.
+# We can verify this for a sample:
+cat("Sample of ALLOW in recipient_data (first 10 values):\n")
+print(head(recipient_data$ALLOW, 10))
+cat("Number of NAs for ALLOW in recipient_data:", sum(is.na(recipient_data$ALLOW)), "out of", nrow(recipient_data), "\n")
+
+cat("Sample of FEELING in recipient_data (first 10 values):\n")
+print(head(recipient_data$FEELING, 10))
+cat("Number of NAs for FEELING in recipient_data:", sum(is.na(recipient_data$FEELING)), "out of", nrow(recipient_data), "\n")
+
+cat("\nDimensions of donor_data:", dim(donor_data), "\n")
+cat("Dimensions of recipient_data:", dim(recipient_data), "\n")
+
+# Ensure target variables exist in donor_data (they should have values there)
+if (!all(c("ALLOW", "FEELING") %in% names(donor_data))) {
+  stop("Target variables ALLOW and/or FEELING are missing from donor_data.")
+}
+cat("Number of NAs for ALLOW in donor_data:", sum(is.na(donor_data$ALLOW)), "\n") # Should be low or zero for donor
+cat("Number of NAs for FEELING in donor_data:", sum(is.na(donor_data$FEELING)), "\n") # Should be low or zero for donor
+
+```
+
+# 2. Defining Variables for Matching
+We define the common variables (X), target variables (Y), and the grouping variable.
+
+```{r}
+# Common variables (X) - UPDATED LIST
+common_vars_names <- c("Age", "Gender", "Occupation", "Domicile",
+                       "Subjective_income", "Political_Orientation",
+                       "Attachment_country", "Life_Satisfaction",
+                       "Economy_Satisfaction", "TRUST")
+
+# Target variables (Y) to be imputed into the recipient from the donor
+target_vars_names <- c("ALLOW", "FEELING")
+
+# Grouping variable
+grouping_var_name <- "Country" 
+
+cat("Common variables defined (common_vars_names):\n")
+print(common_vars_names)
+cat("Target variables defined (target_vars_names):", paste(target_vars_names, collapse=", "), "\n")
+cat("Grouping variable (grouping_var_name):", grouping_var_name, "\n\n")
+
+# Verify common_vars_names exist in both donor_data and recipient_data
+missing_common_in_donor <- common_vars_names[!common_vars_names %in% names(donor_data)]
+if (length(missing_common_in_donor) > 0) {
+  stop(paste("Following common_vars_names are missing from donor_data:", paste(missing_common_in_donor, collapse=", ")))
+}
+missing_common_in_recipient <- common_vars_names[!common_vars_names %in% names(recipient_data)]
+if (length(missing_common_in_recipient) > 0) {
+  stop(paste("Following common_vars_names are missing from recipient_data:", paste(missing_common_in_recipient, collapse=", ")))
+}
+
+# Verify grouping_var_name exists
+if (!grouping_var_name %in% names(donor_data)) {
+  stop(paste("Grouping variable '", grouping_var_name, "' not found in donor_data.", sep=""))
+}
+if (!grouping_var_name %in% names(recipient_data)) {
+  stop(paste("Grouping variable '", grouping_var_name, "' not found in recipient_data.", sep=""))
+}
+
+
+```
+
+# 3. Executing Non-Parametric Matching by Country (k-Nearest Neighbor with Random Selection)
+For the non-parametric integration of the target latent variables ALLOW (rejection of immigration) and FEELING (perceived benefits of immigration) from the European Social Survey Round 10 (ESS10) donor dataset into the Eurobarometer 93.1 recipient dataset, a k-Nearest Neighbor (k-NN) hot deck statistical matching strategy was implemented. This procedure, was applied on a country-by-country basis for the 16 countries common to both surveys.
+The implemented method utilized k=5 nearest neighbors. The Gower distance matrix (Gower, 1971), quantifying the dissimilarity between donor and recipient records, was computed using the daisy function from the cluster package in R, based on 11 common variables (X: Age, Gender, Occupation, Domicile, Subjective_income, Political_Orientation, Attachment_country, Life_Satisfaction, Economy_Satisfaction, and TRUST - see Table 1, Section 3.2.1 of Deliverable D4). This calculation was performed for each country after records with missing values in any of the common variables were removed. The resulting Gower distances informed a nearest neighbor selection process, based on the StatMatch approach, to identify suitable donors. For each eligible recipient record, the k=5 donor records with the smallest Gower distances (within the same country) were identified. One donor was then randomly selected from this set, and its values for the target variables Allow and Feeling were transferred to the recipient record.
+
+```{r matching_loop_daisy_knn_random, results='asis'}
+
+recipient_completed_list_manual <- list()
+k_neighbors <- 5 
+
+donor_data[[grouping_var_name]] <- as.character(donor_data[[grouping_var_name]])
+recipient_data[[grouping_var_name]] <- as.character(recipient_data[[grouping_var_name]])
+
+country_codes_manual <- na.omit(intersect(unique(donor_data[[grouping_var_name]]), 
+                                         unique(recipient_data[[grouping_var_name]])))
+
+cat("Starting manual matching process by country with k-NN (k=", k_neighbors, ")...\n")
+cat(">>> USING common_vars_names:", paste(common_vars_names, collapse=", "), "<<<\n")
+cat(">>> USING cluster::daisy for Gower and MANUAL RANDOM SELECTION from k-Nearest Donors by Country <<<\n\n")
+
+for (code in country_codes_manual) {
+  cat(paste("* Manual Matching: Processing Country with code:", code, "\n"))
+
+  donor_country_orig <- donor_data[donor_data[[grouping_var_name]] == code, ]
+  recipient_country_orig <- recipient_data[recipient_data[[grouping_var_name]] == code, ]
+
+  if (nrow(donor_country_orig) < 1 || nrow(recipient_country_orig) < 1) {
+    cat(paste("  Insufficient data for", code, ". Skipping.\n\n")); 
+    if(nrow(recipient_country_orig) > 0) recipient_completed_list_manual[[code]] <- recipient_country_orig; 
+    next 
+  }
+
+  donor_for_match_prep <- donor_country_orig[, c(common_vars_names, target_vars_names), drop = FALSE]
+  rec_for_match_prep <- recipient_country_orig[, common_vars_names, drop = FALSE] 
+
+  donor_complete_idx <- complete.cases(donor_for_match_prep) 
+  rec_complete_idx <- complete.cases(rec_for_match_prep) 
+
+  donor_clean <- donor_for_match_prep[donor_complete_idx, , drop = FALSE] 
+  rec_clean <- rec_for_match_prep[rec_complete_idx, , drop = FALSE] 
+  idx_rec_processed_in_country_orig <- which(rec_complete_idx)
+
+  if (nrow(donor_clean) < 1 || nrow(rec_clean) < 1) { 
+    cat(paste("  Insufficient clean data (Don:", nrow(donor_clean), ", Rec:", nrow(rec_clean), ") for", code, ". Skipping.\n\n"))
+    recipient_completed_list_manual[[as.character(code)]] <- recipient_country_orig 
+    next
+  }
+  if (nrow(donor_clean) < k_neighbors) { 
+      cat(paste("    WARNING: Clean donors (", nrow(donor_clean), ") < k (", k_neighbors, ") for", code, ". Using all available.\n"))
+  }
+  
+  recipient_country_final <- recipient_country_orig 
+
+  tryCatch({
+    donor_daisy_vars <- donor_clean[, common_vars_names, drop = FALSE]
+    rec_daisy_vars <- rec_clean[, common_vars_names, drop = FALSE]
+    
+    rownames(rec_daisy_vars) <- NULL 
+    rownames(donor_daisy_vars) <- NULL
+    
+    combined_for_daisy_calc <- rbind(rec_daisy_vars, donor_daisy_vars)
+    
+    cat("    Calculating Gower dissimilarity matrix with cluster::daisy...\n")
+    full_dist_object <- cluster::daisy(combined_for_daisy_calc, metric = "gower", stand = FALSE, 
+                                       warnBin = FALSE, warnAsym = FALSE, warnConst = FALSE)
+    full_dist_matrix <- as.matrix(full_dist_object)
+    
+    n_rec_actual <- nrow(rec_daisy_vars)
+    n_don_actual <- nrow(donor_daisy_vars)
+    
+    dist_matrix_rec_x_don <- full_dist_matrix[1:n_rec_actual, 
+                                     (n_rec_actual + 1):(n_rec_actual + n_don_actual), drop = FALSE]
+    
+    if(nrow(dist_matrix_rec_x_don) == 0 || ncol(dist_matrix_rec_x_don) == 0 || all(is.na(dist_matrix_rec_x_don))) {
+        stop(paste("Gower distance matrix is empty or all NA for", code))
+    }
+
+    cat("    Selecting k-NN and performing random imputation (k=", k_neighbors, ")...\n")
+    num_successfully_imputed <- 0
+    
+    for (i_rec in 1:n_rec_actual) { 
+      original_recipient_country_row_idx <- idx_rec_processed_in_country_orig[i_rec] 
+      row_distances_to_donors <- dist_matrix_rec_x_don[i_rec, ]
+      
+      if (all(is.na(row_distances_to_donors))) { next } 
+      
+      valid_donor_indices <- which(!is.na(row_distances_to_donors))
+      if(length(valid_donor_indices) == 0) { next } 
+
+      actual_k <- min(k_neighbors, length(valid_donor_indices)) 
+      
+      ordered_donors <- valid_donor_indices[order(row_distances_to_donors[valid_donor_indices])]
+      closest_k_indices_in_donor_clean <- ordered_donors[1:actual_k]
+      
+      selected_idx_in_donor_clean <- NA_integer_
+      if (length(closest_k_indices_in_donor_clean) == 1) {
+        selected_idx_in_donor_clean <- closest_k_indices_in_donor_clean
+      } else if (length(closest_k_indices_in_donor_clean) > 1) {
+        selected_idx_in_donor_clean <- sample(closest_k_indices_in_donor_clean, 1)
+      }
+      
+      if (!is.na(selected_idx_in_donor_clean) && 
+          selected_idx_in_donor_clean > 0 && 
+          selected_idx_in_donor_clean <= nrow(donor_clean)) {
+        for (target_var in target_vars_names) {
+          recipient_country_final[original_recipient_country_row_idx, target_var] <- donor_clean[selected_idx_in_donor_clean, target_var]
+        }
+        num_successfully_imputed <- num_successfully_imputed + 1
+      }
+    }
+    cat(paste("    Manual k-NN imputation completed for", num_successfully_imputed, 
+              "out of", n_rec_actual, "processable recipient records for Country:", code, "\n"))
+    
+    recipient_completed_list_manual[[as.character(code)]] <- recipient_country_final
+    cat(paste("  Manual matching completed for Country:", code, "\n\n"))
+
+  }, error = function(e_manual_loop) {
+    cat(paste("  ERROR CAUGHT during manual matching for Country:", code, "-", e_manual_loop$message, "\n\n"))
+    recipient_completed_list_manual[[as.character(code)]] <- recipient_country_orig 
+  })
+}
+
+recipient_imputed <- data.frame() 
+if (length(recipient_completed_list_manual) > 0) {
+  recipient_completed_list_manual_filtered <- recipient_completed_list_manual[sapply(recipient_completed_list_manual, function(df) !is.null(df) && is.data.frame(df) && nrow(df) > 0)]
+  if(length(recipient_completed_list_manual_filtered) > 0) {
+    tryCatch({
+      recipient_imputed <- bind_rows(recipient_completed_list_manual_filtered) 
+      cat("Manual imputation process: Aggregation (bind_rows) completed.\n")
+      cat("Dimensions of final recipient_imputed dataset:", dim(recipient_imputed),"\n")
+    }, error = function(e_bind_manual_loop) {
+      cat(paste("ERROR during bind_rows for manual imputation:", e_bind_manual_loop$message, "\nrecipient_imputed will be empty or incomplete.\n"))
+    })
+  } else {
+    warning("recipient_completed_list_manual_filtered is empty. No country data to bind for recipient_imputed.")
+  }
+} else {
+  warning("recipient_completed_list_manual is empty. recipient_imputed will be empty.")
+}
+
+if(nrow(recipient_imputed) == 0) { 
+    warning("FINAL WARNING: recipient_imputed (from manual k-NN) is an empty dataframe. Check logs in Section 3.")
+} else {
+  cat("Final summary of imputed 'ALLOW' in recipient_imputed:\n"); print(summary(recipient_imputed$ALLOW))
+  cat("Final summary of imputed 'FEELING' in recipient_imputed:\n"); print(summary(recipient_imputed$FEELING))
+}
+
+```
+
+# 4. Evaluation of Imputation Quality
+Loading packages and preliminary diagnostics.
+
+```{r setup_evaluation_data_final_with_diag, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyr) 
+library(patchwork) 
+
+k_val_current_report <- 5 
+
+cat("Start Section 4: Evaluation of Imputation Quality\n")
+
+if (!exists("recipient_imputed") || is.null(recipient_imputed) || !is.data.frame(recipient_imputed) || nrow(recipient_imputed) == 0) {
+  stop("recipient_imputed is missing or empty. Check Section 3 (manual k-NN).")
+}
+cat("recipient_imputed (from manual k-NN) exists and has", nrow(recipient_imputed), "rows.\n")
+
+recipient_actually_imputed_eval <- recipient_imputed[!is.na(recipient_imputed$ALLOW) & !is.na(recipient_imputed$FEELING), ]
+if (nrow(recipient_actually_imputed_eval) == 0) {
+    stop("No rows with successfully imputed ALLOW and FEELING found. Evaluation cannot proceed.")
+}
+cat("Records in recipient_actually_imputed_eval (both targets non-NA):", nrow(recipient_actually_imputed_eval), "\n")
+
+valid_imputed_countries_eval <- unique(as.character(recipient_actually_imputed_eval[[grouping_var_name]]))
+donor_original_for_eval_filtered_countries <- donor_data[as.character(donor_data[[grouping_var_name]]) %in% valid_imputed_countries_eval, ]
+
+cat("Records in original donor_data:", nrow(donor_data), "\n")
+cat("Records in donor_original_for_eval_filtered_countries:", nrow(donor_original_for_eval_filtered_countries), "\n")
+
+if(nrow(donor_original_for_eval_filtered_countries) == 0 && length(valid_imputed_countries_eval) > 0){
+    warning("CRITICAL: No donor records for countries in imputed set.")
+}
+if(!all(target_vars_names %in% names(recipient_actually_imputed_eval))) stop("Targets missing from recipient_actually_imputed_eval.")
+if(!all(target_vars_names %in% names(donor_original_for_eval_filtered_countries))) stop("Targets missing from donor_original_for_eval_filtered_countries.")
+
+```
+
+## 4.1. Comparison of Marginal Distributions
+We compare descriptive statistics, densities, and calculate similarity measures for the "ALLOW" and "FEELING" variables.
+
+### 4.1.1. Overall Descriptive Statistics
+```{r}
+cat("Descriptive statistics for ALLOW (Original Donor - filtered countries):\n")
+summary(donor_original_for_eval_filtered_countries$ALLOW)
+cat("\nDescriptive statistics for ALLOW (Imputed Recipient - evaluation set):\n")
+summary(recipient_actually_imputed_eval$ALLOW)
+
+cat("\n\nDescriptive statistics for FEELING (Original Donor - filtered countries):\n")
+summary(donor_original_for_eval_filtered_countries$FEELING)
+cat("\nDescriptive statistics for FEELING (Imputed Recipient - evaluation set):\n")
+summary(recipient_actually_imputed_eval$FEELING)
+
+```
+
+### 4.1.2. Overall Density Plots
+```{r}
+df_allow_plot_eval <- data.frame(
+  value = c(donor_original_for_eval_filtered_countries$ALLOW, recipient_actually_imputed_eval$ALLOW),
+  dataset = factor(rep(c("Original Donor (ESS component)", "Imputed Recipient (ZA component)"), 
+                       times = c(nrow(donor_original_for_eval_filtered_countries), nrow(recipient_actually_imputed_eval)))),
+  stringsAsFactors = FALSE )
+
+p_allow_eval <- ggplot(df_allow_plot_eval, aes(x = value, fill = dataset, color = dataset)) +
+  geom_density(alpha = 0.5, na.rm = TRUE) +
+  labs(title = "Distribution of ALLOW (Overall)", x = "ALLOW", y = "Density") +
+  theme_minimal() + theme(legend.position = "bottom")
+
+df_feeling_plot_eval <- data.frame(
+  value = c(donor_original_for_eval_filtered_countries$FEELING, recipient_actually_imputed_eval$FEELING),
+  dataset = factor(rep(c("Original Donor (ESS component)", "Imputed Recipient (ZA component)"), 
+                       times = c(nrow(donor_original_for_eval_filtered_countries), nrow(recipient_actually_imputed_eval)))),
+  stringsAsFactors = FALSE )
+
+p_feeling_eval <- ggplot(df_feeling_plot_eval, aes(x = value, fill = dataset, color = dataset)) +
+  geom_density(alpha = 0.5, na.rm = TRUE) +
+  labs(title = "Distribution of FEELING (Overall)", x = "FEELING", y = "Density") +
+  theme_minimal() + theme(legend.position = "bottom")
+
+if(nrow(df_allow_plot_eval) > 0) print(p_allow_eval)
+if(nrow(df_feeling_plot_eval) > 0) print(p_feeling_eval)
+
+```
+
+### 4.1.3. Overall Distributional Similarity Measures (Hellinger, Overlap)
+```{r similarity_measures_overall_eval_corrected_final, include=exists("recipient_actually_imputed") && nrow(recipient_actually_imputed) > 0 && exists("donor_original_for_eval_filtered_countries") && nrow(donor_original_for_eval_filtered_countries) > 0}
+
+# For ALLOW
+allow_donor_vec <- na.omit(donor_original_for_eval_filtered_countries$ALLOW)
+allow_rec_vec <- na.omit(recipient_actually_imputed_eval$ALLOW)
+allow_comp_eval <- NULL
+
+if (length(allow_donor_vec) > 1 && length(allow_rec_vec) > 1 &&
+    length(unique(allow_donor_vec)) > 1 && length(unique(allow_rec_vec)) > 1) {
+
+  data_A_allow <- data.frame(ALLOW = allow_donor_vec)
+  data_B_allow <- data.frame(ALLOW = allow_rec_vec)
+
+  allow_comp_eval <- StatMatch::comp.cont(
+      data.A = data_A_allow,
+      data.B = data_B_allow,
+      xlab.A = "ALLOW",  # <-- Aggiungi questo
+      xlab.B = "ALLOW",  # <-- Aggiungi questo
+      ref = FALSE        # <-- Mantieni o aggiungi questo
+  )
+  if (!is.null(allow_comp_eval) && !is.null(allow_comp_eval$dist.discr)) {
+    cat("\nSimilarity measures for ALLOW (Overall):\n")
+    cat(paste("  Overlap Index:", round(allow_comp_eval$dist.discr["overlap"], 3), "\n"))
+    cat(paste("  Hellinger Distance:", round(allow_comp_eval$dist.discr["Hellinger"], 3), "\n"))
+  } else { cat("\nCould not compute similarity for ALLOW or result was NULL.\n") }
+} else { cat("\nInsufficient data or variability for ALLOW to compute similarity.\n") }
+
+# For FEELING
+feeling_donor_vec <- na.omit(donor_original_for_eval_filtered_countries$FEELING)
+feeling_rec_vec <- na.omit(recipient_actually_imputed_eval$FEELING)
+feeling_comp_eval <- NULL
+
+if (length(feeling_donor_vec) > 1 && length(feeling_rec_vec) > 1 &&
+    length(unique(feeling_donor_vec)) > 1 && length(unique(feeling_rec_vec)) > 1) {
+
+  data_A_feeling <- data.frame(FEELING = feeling_donor_vec)
+  data_B_feeling <- data.frame(FEELING = feeling_rec_vec)
+
+  feeling_comp_eval <- StatMatch::comp.cont(
+      data.A = data_A_feeling,
+      data.B = data_B_feeling,
+      xlab.A = "FEELING",  # <-- Aggiungi questo
+      xlab.B = "FEELING",  # <-- Aggiungi questo
+      ref = FALSE         # <-- Mantieni o aggiungi questo
+  )
+  if (!is.null(feeling_comp_eval) && !is.null(feeling_comp_eval$dist.discr)) {
+    cat("\nSimilarity measures for FEELING (Overall):\n")
+    cat(paste("  Overlap Index:", round(feeling_comp_eval$dist.discr["overlap"], 3), "\n"))
+    cat(paste("  Hellinger Distance:", round(feeling_comp_eval$dist.discr["Hellinger"], 3), "\n"))
+  } else { cat("\nCould not compute similarity for FEELING or result was NULL.\n") }
+} else { cat("\nInsufficient data or variability for FEELING to compute similarity.\n") }
+
+
+```
+
+### 4.1.4. Comparison by Country (Country)
+```{r eval_by_country_plots_final_corrected, fig.show='hold', include=exists("recipient_actually_imputed_eval") && nrow(recipient_actually_imputed_eval) > 0 && exists("donor_original_for_eval_filtered_countries") && nrow(donor_original_for_eval_filtered_countries) > 0, message=FALSE, warning=FALSE}
+
+# Lists to store data for plots and metrics by country
+plot_data_list_allow_country <- list()
+plot_data_list_feeling_country <- list()
+eval_metrics_by_country_list_detail <- list()
+
+# Use country codes actually present in the imputed recipient dataset (evaluation set)
+# and for which there is also data in the filtered donor
+valid_countries_recipient <- unique(as.character(recipient_actually_imputed_eval[[grouping_var_name]])) 
+valid_countries_donor <- unique(as.character(donor_original_for_eval_filtered_countries[[grouping_var_name]]))
+countries_to_evaluate <- intersect(valid_countries_recipient, valid_countries_donor)
+
+cat(paste("Starting evaluation by country. Number of countries with data in both sets (filtered donor and imputed recipient eval set):", length(countries_to_evaluate), "\n"))
+
+for(code in countries_to_evaluate){
+  cat(paste("  Processing Country:", code, "\n"))
+
+  donor_subset_country <- donor_original_for_eval_filtered_countries[as.character(donor_original_for_eval_filtered_countries[[grouping_var_name]]) == code, ]
+  recipient_subset_country <- recipient_actually_imputed_eval[as.character(recipient_actually_imputed_eval[[grouping_var_name]]) == code, ] 
+
+  # Check for sufficient data and variability for this specific country
+  # For ALLOW
+  allow_donor_vec_nona_c <- na.omit(donor_subset_country$ALLOW)
+  allow_rec_vec_nona_c <- na.omit(recipient_subset_country$ALLOW)
+  condition_allow_ok <- nrow(donor_subset_country) > 1 && nrow(recipient_subset_country) > 1 &&
+                        length(allow_donor_vec_nona_c) > 1 && length(allow_rec_vec_nona_c) > 1 &&
+                        length(unique(allow_donor_vec_nona_c)) > 1 && length(unique(allow_rec_vec_nona_c)) > 1
+
+  # For FEELING
+  feeling_donor_vec_nona_c <- na.omit(donor_subset_country$FEELING)
+  feeling_rec_vec_nona_c <- na.omit(recipient_subset_country$FEELING)
+  condition_feeling_ok <- nrow(donor_subset_country) > 1 && nrow(recipient_subset_country) > 1 &&
+                          length(feeling_donor_vec_nona_c) > 1 && length(feeling_rec_vec_nona_c) > 1 &&
+                          length(unique(feeling_donor_vec_nona_c)) > 1 && length(unique(feeling_rec_vec_nona_c)) > 1
+
+  if(condition_allow_ok){
+    plot_data_list_allow_country[[code]] <- rbind(
+      data.frame(Country = code, Value = donor_subset_country$ALLOW, Source = "ESS Donor", stringsAsFactors = FALSE),
+      data.frame(Country = code, Value = recipient_subset_country$ALLOW, Source = "Imputed Recipient", stringsAsFactors = FALSE)
+    )
+    allow_comp_c <- StatMatch::comp.cont(data.A = data.frame(ALLOW=allow_donor_vec_nona_c),
+                                         data.B = data.frame(ALLOW=allow_rec_vec_nona_c),
+                                         xlab.A="ALLOW", xlab.B="ALLOW", ref=FALSE)
+  } else {
+    allow_comp_c <- NULL
+    cat(paste("    Insufficient data or lack of variability for ALLOW in country", code, "to calculate metrics/plot.\n"))
+  }
+
+  if(condition_feeling_ok){
+    plot_data_list_feeling_country[[code]] <- rbind(
+      data.frame(Country = code, Value = donor_subset_country$FEELING, Source = "ESS Donor", stringsAsFactors = FALSE),
+      data.frame(Country = code, Value = recipient_subset_country$FEELING, Source = "Imputed Recipient", stringsAsFactors = FALSE)
+    )
+    feeling_comp_c <- StatMatch::comp.cont(data.A = data.frame(FEELING=feeling_donor_vec_nona_c),
+                                           data.B = data.frame(FEELING=feeling_rec_vec_nona_c),
+                                           xlab.A="FEELING", xlab.B="FEELING", ref=FALSE)
+  } else {
+    feeling_comp_c <- NULL
+    cat(paste("    Insufficient data or lack of variability for FEELING in country", code, "to calculate metrics/plot.\n"))
+  }
+
+  # Safe extraction of metrics
+  overlap_allow_c_val <- if(!is.null(allow_comp_c) && !is.null(allow_comp_c$dist.discr) && "overlap" %in% names(allow_comp_c$dist.discr)) allow_comp_c$dist.discr["overlap"] else NA
+  hellinger_allow_c_val <- if(!is.null(allow_comp_c) && !is.null(allow_comp_c$dist.discr) && "Hellinger" %in% names(allow_comp_c$dist.discr)) allow_comp_c$dist.discr["Hellinger"] else NA
+  overlap_feeling_c_val <- if(!is.null(feeling_comp_c) && !is.null(feeling_comp_c$dist.discr) && "overlap" %in% names(feeling_comp_c$dist.discr)) feeling_comp_c$dist.discr["overlap"] else NA
+  hellinger_feeling_c_val <- if(!is.null(feeling_comp_c) && !is.null(feeling_comp_c$dist.discr) && "Hellinger" %in% names(feeling_comp_c$dist.discr)) feeling_comp_c$dist.discr["Hellinger"] else NA
+
+  if(!all(is.na(c(overlap_allow_c_val, hellinger_allow_c_val, overlap_feeling_c_val, hellinger_feeling_c_val)))){
+    eval_metrics_by_country_list_detail[[code]] <- data.frame(
+        Country = code,
+        Overlap_Allow = overlap_allow_c_val, HellingerD_Allow = hellinger_allow_c_val,
+        Overlap_Feeling = overlap_feeling_c_val, HellingerD_Feeling = hellinger_feeling_c_val,
+        stringsAsFactors = FALSE
+    )
+  }
+}
+
+# Plot for Allow by Country
+if (length(plot_data_list_allow_country) > 0) {
+  all_plot_data_allow_country <- bind_rows(plot_data_list_allow_country)
+  p_allow_country_eval <- ggplot(all_plot_data_allow_country, aes(x = Value, fill = Source, color = Source)) +
+    geom_density(alpha = 0.5, na.rm = TRUE) +
+    facet_wrap(vars(Country), scales = "free_y") +
+    labs(title = "Distribution of ALLOW by Country", x = "ALLOW", y = "Density") +
+    theme_minimal(base_size = 8) +
+    theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1, size=6))
+  print(p_allow_country_eval)
+} else { cat("No data for ALLOW plots by country (after validity filters).\n")}
+
+# Plot for Feeling by Country
+if (length(plot_data_list_feeling_country) > 0) {
+  all_plot_data_feeling_country <- bind_rows(plot_data_list_feeling_country)
+  p_feeling_country_eval <- ggplot(all_plot_data_feeling_country, aes(x = Value, fill = Source, color = Source)) +
+    geom_density(alpha = 0.5, na.rm = TRUE) +
+    facet_wrap(vars(Country), scales = "free_y") +
+    labs(title = "Distribution of FEELING by Country", x = "FEELING", y = "Density") +
+    theme_minimal(base_size = 8) +
+    theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1, size=6))
+  print(p_feeling_country_eval)
+} else { cat("No data for FEELING plots by country (after validity filters).\n")}
+
+# Summary Table of Metrics by Country
+if (length(eval_metrics_by_country_list_detail) > 0) {
+  summary_metrics_by_country_df_detail <- bind_rows(eval_metrics_by_country_list_detail)
+  cat("\n\n**Similarity Measures by Country:**\n")
+  print(knitr::kable(summary_metrics_by_country_df_detail, digits = 3, caption = "Distributional Similarity by Country"))
+
+  if (nrow(summary_metrics_by_country_df_detail) > 0 && "Overlap_Allow" %in% names(summary_metrics_by_country_df_detail)) {
+    p_overlap_allow_country_bar <- ggplot(summary_metrics_by_country_df_detail, aes(x=Country, y=Overlap_Allow)) +
+                                   geom_col(fill="skyblue", na.rm = TRUE) +
+                                   theme_minimal(base_size = 8) +
+                                   labs(title="Overlap Index for ALLOW (by Country)", y = "Overlap Index") +
+                                   theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust=1))
+    print(p_overlap_allow_country_bar)
+  }
+  if (nrow(summary_metrics_by_country_df_detail) > 0 && "HellingerD_Allow" %in% names(summary_metrics_by_country_df_detail)) {
+    p_hellinger_allow_country_bar <- ggplot(summary_metrics_by_country_df_detail, aes(x=Country, y=HellingerD_Allow)) +
+                                     geom_col(fill="salmon", na.rm = TRUE) +
+                                     theme_minimal(base_size = 8) +
+                                     labs(title="Hellinger Distance for ALLOW (by Country)", y = "Hellinger Distance")+
+                                     theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust=1))
+    print(p_hellinger_allow_country_bar)
+  }
+  if (nrow(summary_metrics_by_country_df_detail) > 0 && "Overlap_Feeling" %in% names(summary_metrics_by_country_df_detail)) {
+    p_overlap_feeling_country_bar <- ggplot(summary_metrics_by_country_df_detail, aes(x=Country, y=Overlap_Feeling)) +
+                                   geom_col(fill="skyblue", na.rm = TRUE) +
+                                   theme_minimal(base_size = 8) +
+                                   labs(title="Overlap Index for FEELING (by Country)", y = "Overlap Index (FEELING)") +
+                                   theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust=1))
+    print(p_overlap_feeling_country_bar)
+  }
+  if (nrow(summary_metrics_by_country_df_detail) > 0 && "HellingerD_Feeling" %in% names(summary_metrics_by_country_df_detail)) {
+    p_hellinger_feeling_country_bar <- ggplot(summary_metrics_by_country_df_detail, aes(x=Country, y=HellingerD_Feeling)) +
+                                     geom_col(fill="salmon", na.rm = TRUE) +
+                                     theme_minimal(base_size = 8) +
+                                     labs(title="Hellinger Distance for FEELING (by Country)", y = "Hellinger Distance (FEELING)")+
+                                     theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust=1))
+    print(p_hellinger_feeling_country_bar)
+  }
+
+} else {cat("No similarity metrics by country calculated (insufficient data or lack of variability in subgroups).\n")}
+
+```
+
+### 4.1.5. Conditional Distributional Similarity to Covariates
+This type of analysis is very useful because it allows us to understand if the matching quality observed at the aggregate and country level is maintained even in subgroups defined by the levels of the main categorical common variables.
+
+```{r eval_conditional_distributions_final, include=exists("recipient_actually_imputed_eval") && nrow(recipient_actually_imputed_eval) > 0 && exists("donor_original_for_eval_filtered_countries") && nrow(donor_original_for_eval_filtered_countries) > 0, message=FALSE, warning=FALSE}
+
+# Select categorical or ordinal common variables for conditional analysis.
+# These should be 'factor' or 'ordered factor' type variables.
+# common_vars_names is already defined and contains all common variables.
+# We select those that are factors (including ordered) and have a reasonable number of levels.
+potential_cond_vars <- common_vars_names[sapply(donor_original_for_eval_filtered_countries[, common_vars_names, drop=FALSE], function(v) is.factor(v) || is.ordered(v))]
+
+# Choose a subset of these for the analysis to avoid overly extensive output.
+# Adapt this list based on the most relevant variables for your analysis.
+# Variables like 'Occupation' might need recategorization if they have too many levels.
+# Ordinal variables will be treated as categorical for this grouping.
+vars_for_conditional_analysis <- intersect(potential_cond_vars,
+                                           c("Gender", "Occupation", "Domicile",
+                                             "Subjective_income", "Political_Orientation", "Attachment_country",
+                                             "Life_Satisfaction", "Economy_Satisfaction"))
+
+# Exclude variables if they have too many unique levels (e.g., > 10) for brevity,
+# unless they have been recategorized.
+# This is an example filter, you might want to adapt or remove it.
+vars_to_actually_use_for_cond <- c()
+for(v in vars_for_conditional_analysis) {
+    if (v %in% names(donor_original_for_eval_filtered_countries)) { # Check column existence
+        n_levels_check <- length(unique(na.omit(donor_original_for_eval_filtered_countries[[v]])))
+        if (n_levels_check <= 10 && n_levels_check > 1) { # At least 2 levels, no more than 10
+            vars_to_actually_use_for_cond <- c(vars_to_actually_use_for_cond, v)
+        } else {
+            cat(paste("Info: Variable '", v, "' has ", n_levels_check, " unique levels. Excluded from automatic conditional analysis for brevity/relevance.\n", sep=""))
+        }
+    }
+}
+vars_for_conditional_analysis <- vars_to_actually_use_for_cond
+
+cat("\nCategorical/ordinal common variables used for conditional analysis:\n")
+if (length(vars_for_conditional_analysis) > 0) {
+  print(vars_for_conditional_analysis)
+} else {
+  cat("No variable selected for conditional analysis with current criteria.\n")
+}
+
+conditional_metrics_list <- list()
+min_obs_conditional <- 20 # Minimum observations per subgroup to calculate metrics
+
+if (length(vars_for_conditional_analysis) > 0) {
+  for (cond_var in vars_for_conditional_analysis) {
+    cat(paste("\n  Conditional evaluation on variable:", cond_var, "\n"))
+
+    # Ensure conditioning variable exists in both datasets
+    if (!(cond_var %in% names(donor_original_for_eval_filtered_countries)) ||
+        !(cond_var %in% names(recipient_actually_imputed_eval))) { 
+      cat(paste("    Conditioning variable", cond_var, "missing in one of the datasets. Skipping.\n"))
+      next
+    }
+
+    # Determine levels to use (those present in both datasets after filters)
+    # This ensures we are comparing groups that exist in both populations.
+    levels_donor_cond <- unique(na.omit(donor_original_for_eval_filtered_countries[[cond_var]]))
+    levels_recipient_cond <- unique(na.omit(recipient_actually_imputed_eval[[cond_var]])) 
+    common_levels_for_cond_var <- intersect(levels_donor_cond, levels_recipient_cond)
+
+    # If factor levels have an order (e.g., for Subjective_income), respect it
+    if(is.ordered(donor_original_for_eval_filtered_countries[[cond_var]])) {
+        common_levels_for_cond_var <- levels(donor_original_for_eval_filtered_countries[[cond_var]])[
+                                            levels(donor_original_for_eval_filtered_countries[[cond_var]]) %in% common_levels_for_cond_var]
+    } else {
+        common_levels_for_cond_var <- sort(as.character(common_levels_for_cond_var)) # Sort alphabetically for consistency
+    }
+
+    if (length(common_levels_for_cond_var) == 0) {
+        cat(paste("    No common levels for variable", cond_var, "between donor and recipient after filters. Skipping.\n"))
+        next
+    }
+    cat(paste("    Common levels for", cond_var, "analyzed:", paste(common_levels_for_cond_var, collapse=", "), "\n"))
+
+    for (level_val_char in as.character(common_levels_for_cond_var)) { # Iterate over levels as characters for subsetting
+
+      level_val <- NULL
+      if(is.factor(donor_original_for_eval_filtered_countries[[cond_var]])) {
+          level_val <- level_val_char
+      } else if (is.numeric(donor_original_for_eval_filtered_countries[[cond_var]])) {
+          level_val <- as.numeric(level_val_char)
+      } else {
+          level_val <- level_val_char
+      }
+
+      cat(paste("      Level:", level_val_char, "\n"))
+
+      donor_subset_cond <- donor_original_for_eval_filtered_countries[which(donor_original_for_eval_filtered_countries[[cond_var]] == level_val), ]
+      recipient_subset_cond <- recipient_actually_imputed_eval[which(recipient_actually_imputed_eval[[cond_var]] == level_val), ]
+
+      # Allow
+      allow_donor_vec_cond_nona <- na.omit(donor_subset_cond$ALLOW) 
+      allow_rec_vec_cond_nona <- na.omit(recipient_subset_cond$ALLOW)
+
+      overlap_allow_cond <- NA_real_; hellinger_allow_cond <- NA_real_
+
+      if (length(allow_donor_vec_cond_nona) >= min_obs_conditional && length(allow_rec_vec_cond_nona) >= min_obs_conditional &&
+          length(unique(allow_donor_vec_cond_nona)) > 1 && length(unique(allow_rec_vec_cond_nona)) > 1) {
+        comp_allow_cond <- StatMatch::comp.cont(data.A = data.frame(Value = allow_donor_vec_cond_nona),
+                                                data.B = data.frame(Value = allow_rec_vec_cond_nona),
+                                                xlab.A = "Value", xlab.B = "Value", ref = FALSE)
+        if (!is.null(comp_allow_cond) && !is.null(comp_allow_cond$dist.discr) && all(c("overlap", "Hellinger") %in% names(comp_allow_cond$dist.discr))) {
+          overlap_allow_cond <- comp_allow_cond$dist.discr["overlap"]
+          hellinger_allow_cond <- comp_allow_cond$dist.discr["Hellinger"]
+        } else {cat("        Unexpected output from comp.cont for ALLOW, level", level_val_char, "\n")}
+      } else {cat(paste("        Insufficient data/variability for ALLOW (Don:",length(allow_donor_vec_cond_nona),",Rec:",length(allow_rec_vec_cond_nona),") for", cond_var,"level",level_val_char,"\n"))}
+
+      # Feeling
+      feeling_donor_vec_cond_nona <- na.omit(donor_subset_cond$FEELING) 
+      feeling_rec_vec_cond_nona <- na.omit(recipient_subset_cond$FEELING) 
+
+      overlap_feeling_cond <- NA_real_; hellinger_feeling_cond <- NA_real_
+
+      if (length(feeling_donor_vec_cond_nona) >= min_obs_conditional && length(feeling_rec_vec_cond_nona) >= min_obs_conditional &&
+          length(unique(feeling_donor_vec_cond_nona)) > 1 && length(unique(feeling_rec_vec_cond_nona)) > 1) {
+        comp_feeling_cond <- StatMatch::comp.cont(data.A = data.frame(Value = feeling_donor_vec_cond_nona),
+                                                  data.B = data.frame(Value = feeling_rec_vec_cond_nona),
+                                                  xlab.A = "Value", xlab.B = "Value", ref = FALSE)
+        if (!is.null(comp_feeling_cond) && !is.null(comp_feeling_cond$dist.discr) && all(c("overlap", "Hellinger") %in% names(comp_feeling_cond$dist.discr))) {
+          overlap_feeling_cond <- comp_feeling_cond$dist.discr["overlap"]
+          hellinger_feeling_cond <- comp_feeling_cond$dist.discr["Hellinger"]
+        } else {cat("        Unexpected output from comp.cont for FEELING, level", level_val_char, "\n")}
+      } else {cat(paste("        Insufficient data/variability for FEELING (Don:",length(feeling_donor_vec_cond_nona),",Rec:",length(feeling_rec_vec_cond_nona),") for", cond_var,"level",level_val_char,"\n"))}
+
+      conditional_metrics_list[[paste(cond_var, level_val_char, sep="_")]] <- data.frame(
+        Conditioning_Variable = cond_var,
+        Conditioning_Level = level_val_char,
+        Overlap_Allow = overlap_allow_cond,
+        HellingerD_Allow = hellinger_allow_cond,
+        Overlap_Feeling = overlap_feeling_cond,
+        HellingerD_Feeling = hellinger_feeling_cond,
+        N_Donor_Sub = length(allow_donor_vec_cond_nona),
+        N_Recipient_Sub = length(allow_rec_vec_cond_nona),
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+}
+
+if (length(conditional_metrics_list) > 0) {
+  summary_conditional_metrics_df <- bind_rows(conditional_metrics_list)
+  cat("\n\n**Similarity Measures Conditional on Common Variable Levels:**\n")
+  print(knitr::kable(summary_conditional_metrics_df, digits = 3,
+                     caption = "Distributional Similarity Conditional on Covariates"))
+} else {
+  cat("\nNo conditional similarity metrics calculated (insufficient data in subgroups or no valid conditioning variable selected).\n")
+}
+
+```
+
+## 4.2. Preservation of Relationships Between Variables.
+Beyond the similarity of marginal distributions, a crucial aspect of evaluating the quality of statistical imputation is its ability to preserve existing relationships between variables. In this section, we examine the correlation between the two imputed target variables, between these and the common variables, and finally, we compare the imputed Feeling variable with a similar pre-existing measure in the recipient dataset. The results presented refer to k-NN matching with k=r k_val_current_report.
+
+```{r setup_correlation_parameters_for_4_2_revised, include=FALSE}
+
+# Define parameters used in subsequent chunks here, if not already defined globally
+if (!exists("min_obs_for_cor")) min_obs_for_cor <- 15
+if (!exists("k_val_current_report")) k_val_current_report <- 5
+if (!exists("grouping_var_name")) grouping_var_name <- "Country"
+
+# Ensure evaluation dataframes exist
+stopifnot(exists("recipient_actually_imputed_eval"), exists("donor_original_for_eval_filtered_countries"))
+
+```
+
+## 4.2.1. Correlation between Allow and Feeling
+We compare the correlation between the two target variables in the original donor dataset and in the recipient dataset with imputed values.
+
+```{r}
+cat("\n**Overall Correlation between ALLOW and FEELING (k=", k_val_current_report, "):**\n")
+cor_donor_targets_val <- NA
+if(sum(complete.cases(donor_original_for_eval_filtered_countries[, c("ALLOW", "FEELING")])) >= min_obs_for_cor) {
+  cor_donor_targets_val <- cor(donor_original_for_eval_filtered_countries$ALLOW,
+                               donor_original_for_eval_filtered_countries$FEELING,
+                               use = "pairwise.complete.obs")
+}
+cat(paste("  ALLOW-FEELING Correlation (Original Donor - filtered countries):", round(cor_donor_targets_val, 3), "\n"))
+
+cor_recipient_targets_val <- NA
+if(sum(complete.cases(recipient_actually_imputed_eval[, c("ALLOW", "FEELING")])) >= min_obs_for_cor) {
+  cor_recipient_targets_val <- cor(recipient_actually_imputed_eval$ALLOW,
+                                   recipient_actually_imputed_eval$FEELING,
+                                   use = "pairwise.complete.obs")
+}
+cat(paste("  ALLOW-FEELING Correlation (Imputed Recipient):", round(cor_recipient_targets_val, 3), "\n"))
+
+cor_targets_by_country_list <- list()
+processed_country_codes_eval <- unique(as.character(recipient_actually_imputed_eval[[grouping_var_name]]))
+
+
+for(code in processed_country_codes_eval){
+  donor_subset_country <- donor_original_for_eval_filtered_countries[as.character(donor_original_for_eval_filtered_countries[[grouping_var_name]]) == code, ]
+  recipient_subset_country <- recipient_actually_imputed_eval[as.character(recipient_actually_imputed_eval[[grouping_var_name]]) == code, ]
+
+  cor_d_val <- NA; cor_r_val <- NA
+  n_donor_pairs <- 0; n_recipient_pairs <- 0
+
+  if(nrow(donor_subset_country) >= min_obs_for_cor){
+    n_donor_pairs <- sum(complete.cases(donor_subset_country[, c("ALLOW", "FEELING")]))
+    if(n_donor_pairs >= min_obs_for_cor){
+      cor_d_val <- cor(donor_subset_country$ALLOW, donor_subset_country$FEELING, use="pairwise.complete.obs")
+    }
+  }
+  if(nrow(recipient_subset_country) >= min_obs_for_cor){
+    n_recipient_pairs <- sum(complete.cases(recipient_subset_country[, c("ALLOW", "FEELING")]))
+    if(n_recipient_pairs >= min_obs_for_cor){
+      cor_r_val <- cor(recipient_subset_country$ALLOW, recipient_subset_country$FEELING, use="pairwise.complete.obs")
+    }
+  }
+
+  if(!is.na(cor_d_val) || !is.na(cor_r_val)){
+      cor_targets_by_country_list[[code]] <- data.frame(
+          Country=code,
+          Cor_Donor_ALLOW_FEELING=cor_d_val,
+          Cor_Imputed_ALLOW_FEELING=cor_r_val,
+          N_Donor_Pairs = n_donor_pairs,
+          N_Recipient_Pairs = n_recipient_pairs,
+          stringsAsFactors = FALSE
+      )
+  }
+}
+
+if (length(cor_targets_by_country_list) > 0) {
+  summary_cor_targets_by_country_df <- bind_rows(cor_targets_by_country_list)
+  cat("\n\n**Correlation between ALLOW and FEELING by Country (k=", k_val_current_report, "):**\n")
+  print(knitr::kable(summary_cor_targets_by_country_df, digits = 3,
+                     caption = paste("ALLOW-FEELING Correlation by Country (k=", k_val_current_report, ")", sep="")))
+} else {
+  cat("\nNo by-country correlation calculated for ALLOW vs FEELING (insufficient data by country).\n")
+}
+
+```
+
+### 4.2.2. Regression Analysis of Target Variables on Common Variables (k=`r k_val_current_report`)
+We now examine the relationship between the target variables (ALLOW, FEELING) and the common variables using regression analysis. This approach allows for a more detailed understanding of these associations compared to simple bivariate correlations, aligning with the methods described in Deliverable D3, Section 3.7. Models are fitted separately on the original donor (ESS) dataset and the recipient (Eurobarometer) dataset with imputed values.
+
+```{r regression_target_vs_common_and_plots_k5_final_v3, include=exists("recipient_actually_imputed_eval") && nrow(recipient_actually_imputed_eval) > 1 && exists("donor_original_for_eval_filtered_countries") && nrow(donor_original_for_eval_filtered_countries) > 1, message=FALSE, warning=FALSE, results='asis', fig.width=10, fig.height=8}
+# Load necessary packages
+library(knitr)
+library(broom)
+library(ggplot2)
+library(dplyr)
+library(forcats) # For fct_rev, fct_inorder
+
+# Ensure common_vars_names is defined
+if (!exists("common_vars_names")) {
+  common_vars_names <- c("Age", "Gender", "Occupation", "Domicile", "Subjective_income",
+                         "Political_Orientation", "Attachment_country", "Life_Satisfaction",
+                         "Economy_Satisfaction", "TRUST")
+}
+if (!exists("grouping_var_name")) grouping_var_name <- "Country"
+if (!exists("k_val_current_report")) k_val_current_report <- 5
+
+# 1. Define build_formula function (corrected)
+build_formula <- function(target_var, common_vars_df) {
+  terms <- c()
+  for (var_name in common_vars_names) {
+    if (!var_name %in% names(common_vars_df)) { next }
+    if (var_name %in% c("Age", "TRUST") && is.numeric(common_vars_df[[var_name]])) {
+      terms <- c(terms, var_name)
+    } else if (is.factor(common_vars_df[[var_name]])) {
+      if (is.ordered(common_vars_df[[var_name]])) {
+        n_levels <- nlevels(common_vars_df[[var_name]])
+        if (var_name == "Subjective_income" && n_levels == 2) {
+            terms <- c(terms, paste0("as.factor(", var_name, ")"))
+        } else if (n_levels > 2) {
+            poly_degree <- min(n_levels - 1, 3)
+            # Usiamo virgolette singole ' intorno a var_name qui, perché paste0 lo gestirà correttamente
+            # all'interno della stringa più grande. La formula finale sarà interpretata da R.
+            terms <- c(terms, paste0("poly(as.numeric(common_vars_df[['",var_name,"']]), ", poly_degree, ", raw = FALSE)"))
+        } else { 
+            terms <- c(terms, paste0("as.factor(", var_name, ")"))
+        }
+      } else { # Nominal factor
+        terms <- c(terms, paste0("as.factor(", var_name, ")"))
+      }
+    } else if (is.numeric(common_vars_df[[var_name]])) {
+        terms <- c(terms, var_name)
+    }
+  }
+  if (length(terms) == 0) stop("No valid predictor terms found for formula.")
+  formula_str <- paste(target_var, "~", paste(terms, collapse = " + "))
+  return(as.formula(formula_str))
+}
+
+# --- 2. Fit Models and Print Tables ---
+cat("\n\n**Regression Models on Original Donor Data (ESS)**\n")
+formula_allow_donor <- build_formula("ALLOW", donor_original_for_eval_filtered_countries)
+model_allow_donor <- lm(formula_allow_donor, data = donor_original_for_eval_filtered_countries)
+print(kable(tidy(model_allow_donor, conf.int = TRUE), digits = 3, caption = "Regression: ALLOW ~ Common Variables (Donor Data)"))
+
+formula_feeling_donor <- build_formula("FEELING", donor_original_for_eval_filtered_countries)
+model_feeling_donor <- lm(formula_feeling_donor, data = donor_original_for_eval_filtered_countries)
+print(kable(tidy(model_feeling_donor, conf.int = TRUE), digits = 3, caption = "Regression: FEELING ~ Common Variables (Donor Data)"))
+
+cat("\n\n**Regression Models on Imputed Recipient Data (Eurobarometer)**\n")
+formula_allow_recipient <- build_formula("ALLOW", recipient_actually_imputed_eval)
+model_allow_recipient <- lm(formula_allow_recipient, data = recipient_actually_imputed_eval)
+print(kable(tidy(model_allow_recipient, conf.int = TRUE), digits = 3, caption = "Regression: ALLOW ~ Common Variables (Imputed Recipient Data)"))
+
+formula_feeling_recipient <- build_formula("FEELING", recipient_actually_imputed_eval)
+model_feeling_recipient <- lm(formula_feeling_recipient, data = recipient_actually_imputed_eval)
+print(kable(tidy(model_feeling_recipient, conf.int = TRUE), digits = 3, caption = "Regression: FEELING ~ Common Variables (Imputed Recipient Data)"))
+
+cat("\n\nNote: For ordinal predictors with more than two levels (e.g., Political_Orientation, Attachment_country, Life_Satisfaction, Economy_Satisfaction if so defined as ordered factors with >2 levels), orthogonal polynomial contrasts (up to cubic, where appropriate) have been used. Other categorical predictors are treated as factors. 'Age' and 'TRUST' are treated as continuous linear predictors.\n")
+
+# --- 3. Coefficient Plots using broom and ggplot2 ---
+cat("\n\n**Coefficient Plots for Regression Models**\n")
+
+term_label_map <- c(
+  # Nomi ESATTI da tidy() (sinistra) = Etichette desiderate (destra)
+  "Age"                                                                  = "Age",
+  "as.factor(Gender)2"                                                   = "Gender: Woman (Ref: Man)",
+  "as.factor(Occupation)2"                                               = "Occupation: Unemployed (Ref: Employed)",
+  "as.factor(Occupation)3"                                               = "Occupation: Retired (Ref: Employed)",
+  "as.factor(Occupation)4"                                               = "Occupation: In Education (Ref: Employed)",
+  "as.factor(Domicile)2"                                                 = "Domicile: Small / Middle Town (Ref: Big/Large Town)",
+  "as.factor(Domicile)3"                                                 = "Domicile: Rural / Village (Ref: Big/Large Town)",
+  "as.factor(Subjective_income).L"                                       = "Subjective Income: Yes (Ref: No)",
+  "as.factor(Political_Orientation)2"                                    = "Political Orientation: Centre (Ref: Left)",
+  "as.factor(Political_Orientation)3"                                    = "Political Orientation: Right (Ref: Left)",
+  # I nomi dei termini poly() devono includere le virgolette escapate \" se tidy() le produce così
+  "poly(as.numeric(common_vars_df[[\"Attachment_country\"]]), 3, raw = FALSE)1" = "Attachment to Country: L.T.",
+  "poly(as.numeric(common_vars_df[[\"Attachment_country\"]]), 3, raw = FALSE)2" = "Attachment to Country: Q.T.",
+  "poly(as.numeric(common_vars_df[[\"Attachment_country\"]]), 3, raw = FALSE)3" = "Attachment to Country: C.T.",
+  "poly(as.numeric(common_vars_df[[\"Life_Satisfaction\"]]), 3, raw = FALSE)1"    = "Life Satisfaction: L.T.",
+  "poly(as.numeric(common_vars_df[[\"Life_Satisfaction\"]]), 3, raw = FALSE)2"    = "Life Satisfaction: Q.T.",
+  "poly(as.numeric(common_vars_df[[\"Life_Satisfaction\"]]), 3, raw = FALSE)3"    = "Life Satisfaction: C.T.",
+  "poly(as.numeric(common_vars_df[[\"Economy_Satisfaction\"]]), 3, raw = FALSE)1" = "Economy Satisfaction: L.T.",
+  "poly(as.numeric(common_vars_df[[\"Economy_Satisfaction\"]]), 3, raw = FALSE)2" = "Economy Satisfaction: Q.T.",
+  "poly(as.numeric(common_vars_df[[\"Economy_Satisfaction\"]]), 3, raw = FALSE)3" = "Economy Satisfaction: C.T.",
+  "TRUST"                                                                = "TRUST"
+)
+
+# Funzione per creare i grafici dei coefficienti
+create_custom_coefficient_plot <- function(model_list, plot_title, plot_subtitle, term_map, desired_term_order = NULL) {
+  
+  tidy_list <- lapply(names(model_list), function(model_name) {
+    tryCatch({ 
+        tidy(model_list[[model_name]], conf.int = TRUE) %>%
+            mutate(model = model_name) 
+    }, error = function(e) { return(NULL) })
+  })
+  
+  tidy_list <- Filter(Negate(is.null), tidy_list) 
+  if(length(tidy_list) == 0) { return(NULL) }
+  
+  combined_tidy_df <- bind_rows(tidy_list)
+  
+  plot_df <- combined_tidy_df %>%
+    filter(term != "(Intercept)") %>%
+    mutate(term_cleaned = sapply(term, function(x) ifelse(x %in% names(term_map), term_map[[x]], x), USE.NAMES = FALSE))
+  
+  # Ordinamento
+  if (!is.null(desired_term_order)) {
+    # Filtra SOLO i termini puliti che sono effettivamente nell'ordine desiderato E presenti nei dati
+    plot_df_for_ordering <- plot_df %>% filter(term_cleaned %in% desired_term_order)
+    if(nrow(plot_df_for_ordering) > 0){
+        # Usa solo i livelli che sono effettivamente presenti dopo il filtro e che sono in desired_term_order
+        actual_levels_in_order <- intersect(rev(desired_term_order), unique(plot_df_for_ordering$term_cleaned))
+        if(length(actual_levels_in_order) > 0) {
+            plot_df <- plot_df_for_ordering %>%
+                       mutate(term_cleaned = factor(term_cleaned, levels = actual_levels_in_order))
+        } else { # Se intersect è vuoto, usa un fallback
+            plot_df <- plot_df %>% mutate(term_cleaned = fct_rev(fct_inorder(factor(term_cleaned))))
+        }
+    } else {
+        plot_df <- plot_df %>% mutate(term_cleaned = fct_rev(fct_inorder(factor(term_cleaned))))
+    }
+  } else { 
+    plot_df <- plot_df %>% mutate(term_cleaned = fct_rev(fct_inorder(factor(term_cleaned))))
+  }
+
+  if(nrow(plot_df) == 0 || all(is.na(plot_df$term_cleaned))){ 
+      cat("No data left to plot for:", plot_title, "after filtering and ordering.\n") # Debug
+      return(NULL)
+  }
+
+  plot_obj <- ggplot(plot_df, aes(x = estimate, y = term_cleaned, group = model)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey60", linewidth = 0.5) +
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high, color = model), 
+                   height = 0, position = position_dodge(width = 0.7), linewidth = 0.8) +
+    geom_point(aes(color = model, shape = model), 
+               position = position_dodge(width = 0.7), size = 2.5) +
+    scale_color_brewer(palette = "Set1", name = "Dataset / Model:") + 
+    scale_shape_discrete(name = "Dataset / Model:") +
+    labs(title = plot_title,
+         subtitle = plot_subtitle,
+         x = "Coefficient Estimate & 95% Confidence Interval",
+         y = NULL) + 
+    theme_bw(base_size = 10) +
+    theme(legend.position = "bottom",
+          axis.text.y = element_text(size = 8.5, hjust = 0), 
+          plot.title = element_text(hjust = 0.5, face = "bold", size=12),
+          plot.subtitle = element_text(hjust = 0.5, size=10),
+          panel.grid.major.y = element_line(linetype = "dotted", color="grey80"), 
+          panel.grid.minor.y = element_blank(),
+          panel.grid.major.x = element_line(color="grey90"),
+          panel.grid.minor.x = element_blank(),
+          plot.margin = margin(10, 10, 10, 10) 
+          )
+          
+  return(plot_obj)
+}
+
+# --- Definizione dell'ordine desiderato per le etichette sull'asse Y ---
+# USA LE ETICHETTE PULITE che hai definito in term_map, nell'ordine desiderato 
+# (dal basso verso l'alto del grafico, quindi `rev()` verrà usato su questo vettore)
+desired_plot_term_order <- c(
+  "TRUST",
+  "Economy Satisfaction: C.T.", "Economy Satisfaction: Q.T.", "Economy Satisfaction: L.T.",
+  "Life Satisfaction: C.T.", "Life Satisfaction: Q.T.", "Life Satisfaction: L.T.",
+  "Attachment to Country: C.T.", "Attachment to Country: Q.T.", "Attachment to Country: L.T.",
+  "Political Orientation: Right (Ref: Left)", "Political Orientation: Centre (Ref: Left)",
+  "Subjective Income: Yes (Ref: No)",
+  "Domicile: Rural / Village (Ref: Big / Large Town)", "Domicile: Small / Middle Town (Ref: Big / Large Town)",
+  "Occupation: In Education (Ref: Employed)", "Occupation: Retired (Ref: Employed)", "Occupation: Unemployed (Ref: Employed)",
+  "Gender: Woman (Ref: Man)",
+  "Age"
+)
+
+# Plot per ALLOW
+models_allow_list <- list("ALLOW (Donor ESS)" = model_allow_donor, 
+                          "ALLOW (Recipient EB)" = model_allow_recipient)
+cat("\n\nPlotting coefficients for ALLOW models:\n")
+if(exists("model_allow_donor") && exists("model_allow_recipient") &&
+   !is.null(model_allow_donor) && !is.null(model_allow_recipient)) { 
+  plot_allow_coeffs_gg <- create_custom_coefficient_plot(
+    models_allow_list,
+    "Regression Coefficients for ALLOW",
+    "Comparison: Donor (ESS) vs. Imputed Recipient (Eurobarometer)",
+    term_map = term_label_map, 
+    desired_term_order = desired_plot_term_order 
+  )
+  if(!is.null(plot_allow_coeffs_gg)) print(plot_allow_coeffs_gg)
+} else {
+  cat("Models for ALLOW not found or are NULL, skipping plot.\n")
+}
+
+# Plot per FEELING
+models_feeling_list <- list("FEELING (Donor ESS)" = model_feeling_donor, 
+                            "FEELING (Recipient EB)" = model_feeling_recipient)
+cat("\n\nPlotting coefficients for FEELING models:\n")
+if(exists("model_feeling_donor") && exists("model_feeling_recipient") &&
+   !is.null(model_feeling_donor) && !is.null(model_feeling_recipient)) { 
+  plot_feeling_coeffs_gg <- create_custom_coefficient_plot(
+    models_feeling_list,
+    "Regression Coefficients for FEELING",
+    "Comparison: Donor (ESS) vs. Imputed Recipient (Eurobarometer)",
+    term_map = term_label_map, 
+    desired_term_order = desired_plot_term_order 
+  )
+  if(!is.null(plot_feeling_coeffs_gg)) print(plot_feeling_coeffs_gg)
+} else {
+  cat("Models for FEELING not found or are NULL, skipping plot.\n")
+}
+
+cat("\n\nNote on Coefficient Plots: These plots visualize the estimated coefficients and their 95% confidence intervals from the regression models. They help compare the effects of common variables on the target variables across the donor and recipient datasets. The Intercept term is typically omitted for clarity.\n")
+```
+
+
+
+### 4.2.3. Convergent Validity Check: Imputed FEELING vs. Original Eurobarometer FEELING_ZA (k=`r k_val_current_report`)
+To assess the convergent validity of the imputed `FEELING` variable, we compare it with the original `FEELING_ZA` variable available in the Eurobarometer (recipient) dataset. This original variable, though potentially measuring a slightly different nuance or using a different scale, serves as a valuable external benchmark. A moderate to strong positive correlation and similar distributional properties would support the validity of the imputed `FEELING`.
+
+```{r correlation_imputed_vs_original_FEELING_ZA_k5_final, include=TRUE, message=FALSE, warning=FALSE, results='asis', fig.width=8, fig.height=5}
+
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(tidyr) # For pivot_longer
+
+# NOME ESATTO DELLA COLONNA ORIGINALE EUROBAROMETRO COME DA names()
+original_feeling_var_name <- "FEELING_ZA" # <-- CORRETTO CON "FEELING_ZA"
+
+cat(paste0("\n\n**Convergent Validity: FEELING (Imputed) vs. ", original_feeling_var_name, " (Original Eurobarometer)**\n"))
+
+# Ensure data is available
+data_for_conv_check <- recipient_actually_imputed_eval
+
+# Check and prepare the original Eurobarometer feeling variable
+original_feeling_col_exists <- original_feeling_var_name %in% names(data_for_conv_check)
+original_feeling_numeric <- FALSE 
+
+if (original_feeling_col_exists) {
+  original_feeling_original_type <- class(data_for_conv_check[[original_feeling_var_name]])
+  
+  if (!is.numeric(data_for_conv_check[[original_feeling_var_name]])) {
+    cat(paste0("  Note: '", original_feeling_var_name, "' original type was '", original_feeling_original_type, "'. Attempting conversion to numeric.\n"))
+    
+    original_na_count <- sum(is.na(data_for_conv_check[[original_feeling_var_name]]))
+    temp_numeric_col <- suppressWarnings(as.numeric(as.character(data_for_conv_check[[original_feeling_var_name]])))
+    na_after_conversion <- sum(is.na(temp_numeric_col))
+    newly_created_na <- na_after_conversion - original_na_count # Should be non-negative
+    newly_created_na <- max(0, newly_created_na) # Ensure it's not negative if original_na_count was already high
+
+    if (newly_created_na > 0) {
+        cat(paste0("    Warning: Conversion of '", original_feeling_var_name, "' to numeric might have introduced ", newly_created_na, " new NA values (or NAs were already present).\n"))
+    }
+    # Check if conversion resulted in all NAs, but only if the original column had some non-NA values
+    if (all(is.na(temp_numeric_col)) && sum(!is.na(data_for_conv_check[[original_feeling_var_name]])) > 0 ) {
+        cat(paste0("    ERROR: Conversion of '", original_feeling_var_name, "' to numeric resulted in all NAs, but original had data. Cannot proceed with comparison.\n"))
+    } else if (all(is.na(temp_numeric_col)) && sum(!is.na(data_for_conv_check[[original_feeling_var_name]])) == 0 ) {
+        cat(paste0("    Note: '", original_feeling_var_name, "' was already all NAs or became all NAs after conversion. Comparison might not be meaningful.\n"))
+        # We might still set original_feeling_numeric to TRUE if the column exists, 
+        # but downstream functions will handle the all-NA nature.
+        data_for_conv_check$Original_Feeling_Numeric <- temp_numeric_col
+        original_feeling_numeric <- TRUE # Column exists, even if all NA
+    }
+     else {
+        data_for_conv_check$Original_Feeling_Numeric <- temp_numeric_col
+        original_feeling_numeric <- TRUE
+    }
+  } else {
+    data_for_conv_check$Original_Feeling_Numeric <- data_for_conv_check[[original_feeling_var_name]]
+    original_feeling_numeric <- TRUE
+    cat(paste0("  Note: '", original_feeling_var_name, "' is already numeric.\n"))
+  }
+} else {
+  cat(paste0("  ERROR: Column '", original_feeling_var_name, "' not found in recipient_actually_imputed_eval. Cannot proceed.\n"))
+}
+
+# Check FEELING (imputed)
+imputed_feeling_exists_and_numeric <- ("FEELING" %in% names(data_for_conv_check) && is.numeric(data_for_conv_check$FEELING))
+if (!imputed_feeling_exists_and_numeric) {
+  cat("  ERROR: Imputed 'FEELING' column not found or not numeric in recipient_actually_imputed_eval. Cannot proceed.\n")
+}
+
+
+if (imputed_feeling_exists_and_numeric && original_feeling_numeric) {
+  
+  # 1. Descriptive Statistics Comparison
+  desc_stats_feeling_imputed <- data_for_conv_check %>%
+    filter(!is.na(FEELING)) 
+    if(nrow(desc_stats_feeling_imputed) > 0) {
+        desc_stats_feeling_imputed <- desc_stats_feeling_imputed %>%
+        summarise(
+          Variable = "FEELING (Imputed)",
+          Mean = mean(FEELING, na.rm = TRUE),
+          SD = sd(FEELING, na.rm = TRUE),
+          Min = min(FEELING, na.rm = TRUE),
+          Q1 = quantile(FEELING, 0.25, na.rm = TRUE),
+          Median = median(FEELING, na.rm = TRUE),
+          Q3 = quantile(FEELING, 0.75, na.rm = TRUE),
+          Max = max(FEELING, na.rm = TRUE),
+          N_Valid = n()
+        )
+    } else { desc_stats_feeling_imputed <- tibble(Variable = "FEELING (Imputed)", N_Valid = 0) } # Handle all NA case
+  
+  desc_stats_feeling_original <- data_for_conv_check %>%
+    filter(!is.na(Original_Feeling_Numeric)) 
+    if(nrow(desc_stats_feeling_original) > 0) {
+        desc_stats_feeling_original <- desc_stats_feeling_original %>%
+        summarise(
+          Variable = paste0(original_feeling_var_name, " (Original)"),
+          Mean = mean(Original_Feeling_Numeric, na.rm = TRUE),
+          SD = sd(Original_Feeling_Numeric, na.rm = TRUE),
+          Min = min(Original_Feeling_Numeric, na.rm = TRUE),
+          Q1 = quantile(Original_Feeling_Numeric, 0.25, na.rm = TRUE),
+          Median = median(Original_Feeling_Numeric, na.rm = TRUE),
+          Q3 = quantile(Original_Feeling_Numeric, 0.75, na.rm = TRUE),
+          Max = max(Original_Feeling_Numeric, na.rm = TRUE),
+          N_Valid = n()
+        )
+    } else { desc_stats_feeling_original <- tibble(Variable = paste0(original_feeling_var_name, " (Original)"), N_Valid = 0) }
+
+
+  if (desc_stats_feeling_imputed$N_Valid > 0 && desc_stats_feeling_original$N_Valid > 0) {
+    combined_desc_stats <- bind_rows(desc_stats_feeling_imputed, desc_stats_feeling_original)
+    cat("\n  Descriptive Statistics:\n")
+    print(kable(combined_desc_stats, digits = 3, caption = paste0("Descriptive Statistics: FEELING (Imputed) vs. ", original_feeling_var_name, " (Original)")))
+  } else {
+    cat("\n  Could not compute descriptive statistics due to all NA values in one or both variables.\n")
+  }
+  
+  complete_cases_df <- data_for_conv_check %>%
+    select(FEELING_Imputed = FEELING, Original_Feeling = Original_Feeling_Numeric) %>% 
+    na.omit()
+  
+  n_complete_pairs <- nrow(complete_cases_df)
+  cat(paste0("\n  Number of complete pairs for comparison: ", n_complete_pairs, "\n"))
+
+  min_obs_for_cor_local <- if(exists("min_obs_for_cor")) min_obs_for_cor else 15 
+
+  if (n_complete_pairs >= min_obs_for_cor_local) { 
+    
+    cor_pearson <- cor(complete_cases_df$FEELING_Imputed, complete_cases_df$Original_Feeling, method = "pearson")
+    cor_spearman <- cor(complete_cases_df$FEELING_Imputed, complete_cases_df$Original_Feeling, method = "spearman")
+    cat(paste0("  Pearson Correlation: ", round(cor_pearson, 3), "\n"))
+    cat(paste0("  Spearman Rank Correlation: ", round(cor_spearman, 3), "\n"))
+    
+    cat("\n  Scatter Plot:\n")
+    p_scatter <- ggplot(complete_cases_df, aes(x = Original_Feeling, y = FEELING_Imputed)) +
+      geom_point(alpha = 0.3, shape=16) +
+      geom_smooth(method = "lm", color = "blue", se = TRUE) +
+      labs(
+        title = paste0("Convergent Validity: Imputed FEELING vs. Original ", original_feeling_var_name),
+        subtitle = paste0("Pearson r = ", round(cor_pearson, 3), "; Spearman rho = ", round(cor_spearman, 3), " (N = ", n_complete_pairs, ")"),
+        x = paste0(original_feeling_var_name, " (Original Eurobarometer)"),
+        y = "FEELING (Imputed)"
+      ) +
+      theme_bw(base_size = 10) +
+      theme(plot.title = element_text(hjust = 0.5, face="bold"),
+            plot.subtitle = element_text(hjust = 0.5))
+    print(p_scatter)
+    
+    cat("\n  Overlapping Density Plots:\n")
+    density_data_long <- data_for_conv_check %>%
+      select(FEELING_Imputed_Plot = FEELING, Original_Feeling_Plot = Original_Feeling_Numeric) %>% # Nomi unici per pivot
+      rename(`FEELING (Imputed)` = FEELING_Imputed_Plot, 
+             !!paste0(original_feeling_var_name, " (Original)") := Original_Feeling_Plot) %>% 
+      pivot_longer(cols = everything(), names_to = "Variable_Source", values_to = "Value") %>%
+      na.omit()
+
+    if(nrow(density_data_long) > 0){
+        p_density <- ggplot(density_data_long, aes(x = Value, fill = Variable_Source, color = Variable_Source)) +
+          geom_density(alpha = 0.5) +
+          labs(
+            title = paste0("Distributional Comparison: Imputed FEELING vs. Original ", original_feeling_var_name),
+            x = "Score",
+            y = "Density"
+          ) +
+          theme_bw(base_size = 10) +
+          theme(legend.position = "bottom",
+                plot.title = element_text(hjust = 0.5, face="bold")) +
+          scale_fill_brewer(palette="Pastel1", name="Variable Source:") +
+          scale_color_brewer(palette="Set1", name="Variable Source:")
+          
+        print(p_density)
+    } else {
+        cat("  Not enough data for density plot after processing.\n")
+    }
+    
+  } else {
+    cat(paste0("  Insufficient complete pairs (N=", n_complete_pairs, ") for correlation and plotting. Minimum required: ", min_obs_for_cor_local, "\n"))
+  }
+} else {
+  cat("  Cannot perform convergent validity check due to missing or non-numeric key variables as detailed above.\n")
+}
+
+```
+
+####QQ-Plot: Imputed FEELING vs. Original FEELING_ZA
+
+```{r qqplot_feeling_vs_za, include=TRUE, message=FALSE, warning=FALSE}
+
+library(ggplot2)
+
+# Rimuove NA
+qq_data <- na.omit(
+  recipient_actually_imputed_eval[, c("FEELING", "FEELING_ZA")]
+)
+
+# Verifica dati sufficienti
+if (nrow(qq_data) >= 30) {
+
+  # Ordina i due vettori
+  q1 <- quantile(qq_data$FEELING, probs = seq(0, 1, length.out = nrow(qq_data)))
+  q2 <- quantile(qq_data$FEELING_ZA, probs = seq(0, 1, length.out = nrow(qq_data)))
+  qq_df <- data.frame(Imputed = q1, Original = q2)
+
+  # Plotta
+  ggplot(qq_df, aes(x = Original, y = Imputed)) +
+    geom_point(alpha = 0.4) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red", linewidth = 1) +
+    labs(
+      title = "QQ Plot: Imputed FEELING vs. FEELING_ZA",
+      x = "Quantiles of FEELING_ZA (Original)",
+      y = "Quantiles of FEELING (Imputed)"
+    ) +
+    theme_minimal()
+
+} else {
+  cat("Not enough valid data to generate QQ plot.")
+}
+
+```
+
+
+####Additional Distributional Similarity Measures: FEELING vs. FEELING_ZA
+```{r similarity_measures_FEELING_vs_ZA, include=TRUE, message=FALSE, warning=FALSE}
+
+# Vettori senza NA
+feeling_imp_vec <- na.omit(recipient_actually_imputed_eval$FEELING)
+feeling_za_vec <- na.omit(recipient_actually_imputed_eval$FEELING_ZA)
+
+# Inizializza
+feeling_validity_comp <- NULL
+
+# Controlla validità
+if (length(feeling_imp_vec) > 1 && length(feeling_za_vec) > 1 &&
+    length(unique(feeling_imp_vec)) > 1 && length(unique(feeling_za_vec)) > 1) {
+
+  # Entrambe le colonne devono avere lo stesso nome per il confronto
+  data_A <- data.frame(FEELING = feeling_imp_vec)
+  data_B <- data.frame(FEELING = feeling_za_vec)
+
+  # Calcolo similarità
+  feeling_validity_comp <- StatMatch::comp.cont(
+    data.A = data_A,
+    data.B = data_B,
+    xlab.A = "FEELING",
+    xlab.B = "FEELING",
+    ref = FALSE
+  )
+
+  if (!is.null(feeling_validity_comp$dist.discr)) {
+    cat("\\nDistributional Similarity Measures (FEELING vs. FEELING_ZA):\\n")
+    cat(paste("  Overlap Index:", round(feeling_validity_comp$dist.discr["overlap"], 3), "\\n"))
+    cat(paste("  Hellinger Distance:", round(feeling_validity_comp$dist.discr["Hellinger"], 3), "\\n"))
+  } else {
+    cat("Unable to compute similarity metrics.\\n")
+  }
+
+} else {
+  cat("Insufficient data or variability for FEELING vs. FEELING_ZA.\\n")
+}
+
+```

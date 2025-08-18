@@ -1,0 +1,400 @@
+---
+title: "MICE-MITML imputation: distances between distributions"
+author: "ENCLOSE project" 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+# load packages
+
+```{r  message=FALSE, warning=FALSE}
+library(StatMatch)
+library(mice)
+library(miceadds) 
+library(dplyr)
+library(openxlsx)
+library(writexl)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(stats)      
+```
+
+# DATA LOADINGS
+
+```{r}
+load("ENCLOSE_mice_mitml_imputation.RData")
+country_labels <- c("BE", "BG", "CZ", "EE", "FI", "FR", "GR", "HR",
+                    "HU", "IE", "IT", "LT", "NL", "PT", "SI", "SK")
+```
+
+# Function to compute comparison indexes
+```{r,warning=FALSE}
+distribution_distances <- function(data_long, variable, 
+                            method_name, bins = 40) 
+  {
+  results <- list()
+  
+  # Extract observed data (original, non-imputed)
+  obs <- data_long %>% filter(.imp == 0 & source=="ESS")
+ 
+  # Loop over imputations
+  for (i in unique(data_long$.imp)) {
+    if (i == 0) next  # skip original data
+    
+    imp <- data_long %>% filter(.imp == i & source=="ZA") 
+    sm <- comp.cont(obs, imp, xlab.A = variable, xlab.B = variable, 
+                    w.A = NULL, w.B = NULL, ref = FALSE)
+   
+    # Store results
+    results[[paste0(method_name, "_", i)]] <- data.frame(
+      method = method_name,
+      imputation = i,
+      HD=sm[[4]][3],
+      Overlap = sm[[4]][2]
+    )
+  }
+  return(bind_rows(results))
+}
+```
+
+```{r,warning=FALSE}
+
+dist_allow_norm  <- distribution_distances(completed_data_norm,  
+                                            "ALLOW", "FCSsl")
+dist_allow_FCSri  <- distribution_distances(completed_data_FCSri,  
+                                            "ALLOW", "FCSri")
+dist_allow_FCSrs  <- distribution_distances(completed_data_imp_FCSrs,  
+                                            "ALLOW", "FCSrs")
+dist_allow_JMsep  <- distribution_distances(completed_data_JMsep,  
+                                            "ALLOW", "JMsep")
+dist_allow_JMri  <- distribution_distances(completed_data_JMri,  
+                                            "ALLOW", "JMri")
+dist_allow_JMrs  <- distribution_distances(completed_data_JMrs,  
+                                            "ALLOW", "JMrs")
+
+dist_feeling_norm  <- distribution_distances(completed_data_norm,  
+                                            "FEELING", "FCSsl")
+dist_feeling_FCSri  <- distribution_distances(completed_data_FCSri,  
+                                              "FEELING", "FCSri")
+dist_feeling_FCSrs  <- distribution_distances(completed_data_imp_FCSrs,  
+                                              "FEELING", "FCSrs")
+dist_feeling_JMsep  <- distribution_distances(completed_data_JMsep,  
+                                            "FEELING", "JMsep")
+dist_feeling_JMri  <- distribution_distances(completed_data_JMri,  
+                                            "FEELING", "JMri")
+dist_feelingJMrs  <- distribution_distances(completed_data_JMrs,  
+                                            "FEELING", "JMrs")
+```
+
+
+
+
+
+```{r,warning=FALSE}
+distance_results_allow <- bind_rows(dist_allow_norm, dist_allow_FCSri, dist_allow_FCSrs,dist_allow_JMsep,dist_allow_JMri, dist_allow_JMrs )
+
+summary_table_distances_allow <- distance_results_allow %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  )
+
+summary_table_distances_allow
+```
+
+```{r,warning=FALSE}
+
+distance_results_feeling <- bind_rows(dist_feeling_norm,dist_feeling_FCSri, dist_feeling_FCSrs,dist_feeling_JMsep,dist_feeling_JMri, dist_feelingJMrs )
+
+summary_table_distances_feeling <- distance_results_feeling %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  )
+
+summary_table_distances_feeling
+```
+
+
+```{r}
+# Combine distance results
+distance_results_allow$Variable <- "Immigration rejection"
+distance_results_feeling$Variable <- "Perceived benefits of immigration"
+combined_distances <- rbind(distance_results_allow, 
+                            distance_results_feeling)
+```
+
+```{r, fig.width=8, fig.height=4, dpi=300}
+png("HD.png", width = 2000, height = 1200, res = 300)
+combined_distances %>%
+  pivot_longer(cols = c(HD),names_to = "Metric", values_to = "Value") %>%
+  ggplot(aes(x = method, y = Value, fill = method)) +
+  geom_boxplot() +
+  facet_grid(Metric ~ Variable, scales = "free_y", space = "free_y") +  
+  theme_minimal() +
+  labs(title = "Hellinger distance across imputation methods",
+       x = "Imputation Method", y = "Distance") +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 8, face = "bold"),  
+    strip.background = element_rect(fill = "lightgray", color = "black", size = 1),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.major = element_line(color = "gray", linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(2, "lines")  
+  )
+dev.off()
+knitr::include_graphics("HD.png")
+```
+
+
+```{r, fig.width=8, fig.height=4, dpi=300}
+png("Overlap.png", width = 2000, height = 1200, res = 300)
+combined_distances %>%
+  pivot_longer(cols = c(Overlap),names_to = "Metric", values_to = "Value") %>%
+  ggplot(aes(x = method, y = Value, fill = method)) +
+  geom_boxplot() +
+  facet_grid(Metric ~ Variable, scales = "free_y", space = "free_y") +
+  theme_minimal() +
+  labs(title = "Overlap measure across imputation methods",
+       x = "Imputation Method", y = "Overlap") +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 8, face = "bold"),  
+    strip.background = element_rect(fill = "lightgray", color = "black", size = 1),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.major = element_line(color = "gray", linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(2, "lines")  
+  )
+dev.off()
+knitr::include_graphics("Overlap.png")
+```
+
+
+
+```{r,warning=FALSE}
+summary_dist_country_allow=matrix(NA,16,12)
+for (j in 1:16){
+dist_norm <- distribution_distances(completed_data_norm
+            [completed_data_norm$Country_code==j,], "ALLOW", "FCSsl")
+dist_FCSri <- distribution_distances(completed_data_FCSri
+            [completed_data_FCSri$Country_code==j,], "ALLOW", "FCSri")
+dist_FCSrs <- distribution_distances(completed_data_imp_FCSrs
+            [completed_data_imp_FCSrs$Country_code==j,],  "ALLOW", "FCSrs")
+dist_JMsep <- distribution_distances(completed_data_JMsep
+            [completed_data_JMsep$Country_code==j,],  "ALLOW", "JMsep")
+dist_JMri <- distribution_distances(completed_data_JMri
+            [completed_data_JMri$Country_code==j,],  "ALLOW", "JMri")
+dist_JMrs <- distribution_distances(completed_data_JMrs
+            [completed_data_JMrs$Country_code==j,],  "ALLOW", "JMrs")
+
+dist_allow <- bind_rows(dist_norm,dist_FCSri, dist_FCSrs, dist_JMsep,dist_JMri,dist_JMrs)
+summary_dist_country_allow[j,] <-as.numeric(dist_allow %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  ) %>%
+  pivot_wider(
+    names_from = method,
+    values_from = c(HD,Overlap),
+    names_glue = "{.value}_{method}"
+  ))
+
+rm(dist_norm,dist_FCSri,dist_FCSrs,dist_JMsep,dist_JMri,dist_JMrs,dist_allow)
+}
+
+rownames(summary_dist_country_allow)=country_labels
+colnames(summary_dist_country_allow)=
+  c("FCSsl_HD","FCSri_HD","FCSrs_HD","JMsep_HD","JMri_HD","JMrs_HD",
+  "FCSsl_Overlap","FCSri_Overlap","FCSrs_Overlap","JMsep_Overlap","JMri_Overlap","JMrs_Overlap")
+
+summary_dist_country_allow
+```
+
+```{r,warning=FALSE}
+summary_dist_country_feeling=matrix(NA,16,12)
+for (j in 1:16){
+dist_norm <- distribution_distances(completed_data_norm
+            [completed_data_norm$Country_code==j,], "FEELING", "FCSsl")
+dist_FCSri <- distribution_distances(completed_data_FCSri
+            [completed_data_FCSri$Country_code==j,], "FEELING", "FCSri")
+dist_FCSrs <- distribution_distances(completed_data_imp_FCSrs
+            [completed_data_imp_FCSrs$Country_code==j,],"FEELING", "FCSrs")
+dist_JMsep <- distribution_distances(completed_data_JMsep
+            [completed_data_JMsep$Country_code==j,],  "FEELING", "JMsep")
+dist_JMri <- distribution_distances(completed_data_JMri
+            [completed_data_JMri$Country_code==j,],  "FEELING", "JMri")
+dist_JMrs <- distribution_distances(completed_data_JMrs
+            [completed_data_JMrs$Country_code==j,],  "FEELING", "JMrs")
+
+dist_feeling <- bind_rows(dist_norm,dist_FCSri, dist_FCSrs, dist_JMsep,dist_JMri,dist_JMrs)
+summary_dist_country_feeling[j,] <-as.numeric(dist_feeling %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  ) %>%
+  pivot_wider(
+    names_from = method,
+    values_from = c(HD,Overlap),
+    names_glue = "{.value}_{method}"
+  ))
+
+rm(dist_norm,dist_FCSri,dist_FCSrs,dist_JMsep,dist_JMri,dist_JMrs,dist_feeling)
+} 
+rownames(summary_dist_country_feeling)=country_labels
+colnames(summary_dist_country_feeling)=
+  c("FCSsl_HD","FCSri_HD","FCSrs_HD","JMsep_HD","JMri_HD","JMrs_HD",
+  "FCSsl_Overlap","FCSri_Overlap","FCSrs_Overlap","JMsep_Overlap","JMri_Overlap","JMrs_Overlap")
+
+summary_dist_country_feeling
+```
+
+
+
+## conditional distribution on covariates
+```{r}
+# List of common variables to loop through
+common_variables <- c("Gender", "Occupation", "Domicile", 
+                    "Subjective_income", "Political_Orientation",
+                    "Attachment_country", 
+                    "Life_Satisfaction", "Economy_Satisfaction")
+
+# Calculate the total number of rows based on the levels of each variable
+num_rows <- sum(sapply(common_variables, function(var) length(unique(completed_data_FCSri[[var]]))))
+```
+
+```{r}
+summary_dist_allow <- matrix(NA, num_rows, 12)
+row_counter <- 1
+
+# Loop through each variable
+for (i in 1:length(common_variables)) {
+  # Get the levels of the current variable
+  levels_variable <- unique(completed_data_FCSri[[common_variables[i]]])
+  
+  # Loop through the levels of the current variable
+  for (j in levels_variable) {
+
+    dist_norm <- distribution_distances(completed_data_norm
+            [completed_data_norm[[common_variables[i]]] == j,], "ALLOW", "FCSsl")
+    dist_FCSri <- distribution_distances(completed_data_FCSri
+        [completed_data_FCSri[[common_variables[i]]] == j, ], "ALLOW", "FCSri")
+    dist_FCSrs <- distribution_distances(completed_data_imp_FCSrs
+        [completed_data_imp_FCSrs[[common_variables[i]]] == j, ], "ALLOW", "FCSrs")
+    dist_JMsep <- distribution_distances(completed_data_JMsep
+            [completed_data_JMsep[[common_variables[i]]] == j,],  "ALLOW", "JMsep")
+    dist_JMri <- distribution_distances(completed_data_JMri
+        [completed_data_JMri[[common_variables[i]]] == j, ], "ALLOW", "JMri")
+    dist_JMrs <- distribution_distances(completed_data_JMrs
+        [completed_data_JMrs[[common_variables[i]]] == j, ], "ALLOW", "JMrs")
+ 
+    
+  dist_allow <- bind_rows(dist_norm,dist_FCSri, dist_FCSrs,dist_JMsep, dist_JMri,dist_JMrs)
+  summary_dist_allow[row_counter,] <-as.numeric(dist_allow %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  ) %>%
+  pivot_wider(
+    names_from = method,
+    values_from = c(HD,Overlap),
+    names_glue = "{.value}_{method}"
+  )) 
+    # Increase row counter
+    row_counter <- row_counter + 1
+ 
+    rm(dist_norm,dist_FCSri,dist_FCSrs,dist_JMsep,dist_JMri,dist_JMrs,dist_allow)
+  }
+}
+
+# Assign row names as the combination of variables and their levels
+row_names <- unlist(lapply(common_variables, function(var) {
+  levels_var <- unique(completed_data_JMri[[var]])
+  paste(var, levels_var, sep = ": ")
+}))
+
+rownames(summary_dist_allow) <- row_names
+colnames(summary_dist_allow)=
+   c("FCSsl_HD","FCSri_HD","FCSrs_HD","JMsep_HD","JMri_HD","JMrs_HD",
+  "FCSsl_Overlap","FCSri_Overlap","FCSrs_Overlap","JMsep_Overlap","JMri_Overlap","JMrs_Overlap")
+summary_dist_allow
+```
+
+```{r}
+summary_dist_feeling <- matrix(NA, num_rows,12)
+row_counter <- 1
+
+# Loop through each variable
+for (i in 1:length(common_variables)) {
+  # Get the levels of the current variable
+  levels_variable <- unique(completed_data_FCSri[[common_variables[i]]])
+  
+  # Loop through the levels of the current variable
+  for (j in levels_variable) {
+
+    dist_norm <- distribution_distances(completed_data_norm
+            [completed_data_norm[[common_variables[i]]] == j,], "FEELING", "FCSsl")
+    dist_FCSri <- distribution_distances(completed_data_FCSri
+        [completed_data_FCSri[[common_variables[i]]] == j, ], "FEELING", "FCSri")
+    dist_FCSrs <- distribution_distances(completed_data_imp_FCSrs
+        [completed_data_imp_FCSrs[[common_variables[i]]] == j, ], "FEELING", "FCSrs")
+    dist_JMsep <- distribution_distances(completed_data_JMsep
+            [completed_data_JMsep[[common_variables[i]]] == j,],  "FEELING", "JMsep")
+    dist_JMri <- distribution_distances(completed_data_JMri
+        [completed_data_JMri[[common_variables[i]]] == j, ], "FEELING", "JMri")
+    dist_JMrs <- distribution_distances(completed_data_JMrs
+        [completed_data_JMrs[[common_variables[i]]] == j, ], "FEELING", "JMrs")
+ 
+    
+  dist_feeling <- bind_rows(dist_norm,dist_FCSri, dist_FCSrs,dist_JMsep, dist_JMri,dist_JMrs)
+  summary_dist_feeling[row_counter,] <-as.numeric(dist_feeling %>%
+  group_by(method) %>%
+  summarise(
+    HD=mean(HD, na.rm = TRUE),
+    Overlap = mean(Overlap, na.rm = TRUE)
+  ) %>%
+  pivot_wider(
+    names_from = method,
+    values_from = c(HD,Overlap),
+    names_glue = "{.value}_{method}"
+  )) 
+    # Increase row counter
+    row_counter <- row_counter + 1
+ 
+    rm(dist_norm,dist_FCSri,dist_FCSrs,dist_JMsep,dist_JMri,dist_JMrs,dist_feeling)
+  }
+}
+
+# Assign row names as the combination of variables and their levels
+row_names <- unlist(lapply(common_variables, function(var) {
+  levels_var <- unique(completed_data_FCSri[[var]])
+  paste(var, levels_var, sep = ": ")
+}))
+
+rownames(summary_dist_feeling) <- row_names
+colnames(summary_dist_feeling)=
+  c("FCSsl_HD","FCSri_HD","FCSrs_HD","JMsep_HD","JMri_HD","JMri_HD",
+  "FCSsl_Overlap","FCSri_Overlap","FCSrs_Overlap","JMsep_Overlap","JMri_Overlap","JMrs_Overlap")
+summary_dist_feeling
+```
+
+
+
+```{r,warning=F}
+write.xlsx(list(distance_country_Allow = summary_dist_country_allow,
+    distance_country_Feeling = summary_dist_country_feeling,
+    distance_covariate_allow=summary_dist_allow,
+    distance_covariate_feeling=summary_dist_feeling
+    ), file = "mice_mitml_distance.xlsx", rowNames = TRUE)
+```
