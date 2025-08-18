@@ -1,0 +1,1126 @@
+---
+title: "Data Harmonization"
+author: "ENCLOSE project"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE)
+```
+
+
+```{r, include=TRUE, message=FALSE, warning=FALSE}
+library(haven)
+library(dplyr)
+```
+
+# Loading and reducing ESS10
+```{r}
+or_data9 <- read_sav("ESS9.sav")
+data9=or_data9;
+
+```
+
+```{r}
+# List of variables as character vector (paste yours here)
+vars_to_keep_10 <- c(
+ "cntry", "gndr", "agea",
+  "maritalb", "domicil", "eisced", "mnactic", "hincfel", "polintr", "vote", "lrscale", "stflife",
+  "happy", "atchctr", "atcherp", "rlgdgr", "dscrgrp", "ppltrst", "pplfair", "pplhlp", "psppsgva",
+  "actrolga", "psppipla", "cptppola", "impsafe", "imptrad",
+  "ipbhprp", "ipfrule", "ipmodst", "ipstrgv", "impdiff", "impfree", "impfun", "ipadvnt", "ipcrtiv",
+  "ipgdtim", "imprich", "iprspot", "ipshabt", "ipsuces", "impenv", "ipeqopt", "iphlppl", "iplylfr",
+  "ipudrst","trstprl", "trstlgl", "trstplc", "trstplt", "trstprt",
+  "trstep", "trstun", "stfeco", "stfgov", "stfdem", "stfedu", "stfhlth",  "anweight")
+
+
+# Subset the dataset
+data9 <- data9[, vars_to_keep_10]
+
+missing_vars <- setdiff(vars_to_keep_10, names(data9))
+if (length(missing_vars) > 0) {
+  cat("Variables not found in data9:", paste(missing_vars, collapse = ", "), "\n")
+}
+
+```
+
+
+# Loading and reducing ESS11
+```{r}
+or_data11 <- read_sav("ESS11.sav")
+data11=or_data11;
+```
+
+```{r}
+# Define the list of variables to keep
+vars_to_keep_11 <- c(
+ "cntry", "gndr", "agea",
+  "maritalb", "domicil", "eisced", "mnactic", "hincfel", "polintr", "vote", "lrscale", "stflife",
+  "happy", "atchctr", "atcherp", "rlgdgr", "dscrgrp", "ppltrst", "pplfair", "pplhlp", "psppsgva",
+  "actrolga", "psppipla", "cptppola", "impsafea", "imptrada",
+  "ipbhprpa", "ipfrulea", "ipmodsta", "ipstrgva", "impdiffa", "impfreea", "impfuna", "ipadvnta",
+  "ipcrtiva", "ipgdtima", "impricha", "iprspota", "ipshabta", "ipsucesa", "impenva", "ipeqopta",
+  "iphlppla", "iplylfra", "ipudrsta", "trstprl", "trstlgl", "trstplc", "trstplt", "trstprt",
+  "trstep", "trstun", "stfeco", "stfgov", "stfdem", "stfedu", "stfhlth", "anweight")
+# Subset the dataset
+data11 <- data11[, vars_to_keep_11]
+
+# Optional: Check for missing variables
+missing_vars <- setdiff(vars_to_keep_11, names(data11))
+if (length(missing_vars) > 0) {
+  cat("Variables not found in data11:", paste(missing_vars, collapse = ", "), "\n")
+}
+
+```
+
+```{r}
+data11 <- data11 %>%
+  rename(
+    impdiff  = impdiffa,
+    impenv   = impenva,
+    impfree  = impfreea,
+    impfun   = impfuna,
+    imprich  = impricha,
+    impsafe  = impsafea,
+    imptrad  = imptrada,
+    ipadvnt  = ipadvnta,
+    ipbhprp  = ipbhprpa,
+    ipcrtiv  = ipcrtiva,
+    ipeqopt  = ipeqopta,
+    ipfrule  = ipfrulea,
+    ipgdtim  = ipgdtima,
+    iphlppl  = iphlppla,
+    iplylfr  = iplylfra,
+    ipmodst  = ipmodsta,
+    iprspot  = iprspota,
+    ipshabt  = ipshabta,
+    ipstrgv  = ipstrgva,
+    ipsuces  = ipsucesa,
+    ipudrst  = ipudrsta
+  )
+
+```
+
+
+```{r}
+(check_names=identical(names(data9), names(data11)))
+
+```
+
+
+```{r}
+rm(or_data9,or_data11,check_names,missing_vars, vars_to_keep_10,vars_to_keep_11)
+
+```
+
+# initialize datasets
+```{r}
+data9_h=data9      # _h stand for harmonized
+data11_h=data11    # _h stand for harmonized
+```
+
+
+## Countries
+```{r}
+countries <- intersect(unique(data9$cntry), unique(data11$cntry))
+
+# Filter datasets by country
+data9_h <- data9_h %>% filter(cntry %in% countries)
+data11_h <- data11_h %>% filter(cntry %in% countries)
+
+# Convert SPSS-labelled 'cntry' variable into a proper factor
+data9_h$cntry <- haven::zap_labels(data9_h$cntry)
+data9_h$cntry <- as.factor(data9_h$cntry)
+
+data11_h$cntry <- haven::zap_labels(data11_h$cntry)
+data11_h$cntry <- as.factor(data11_h$cntry)
+
+# Check summaries
+summary(data9_h$cntry)
+summary(data11_h$cntry)
+```
+
+
+# TARGET VARIABLES
+
+### Trust in institutions
+```{r}
+# Convert to numeric
+trust_vars <- c("trstprl", "trstlgl", "trstplc", "trstplt", "trstprt", "trstep", "trstun")
+
+to_numeric <- function(df) {
+  df[trust_vars] <- lapply(df[trust_vars], as.numeric)
+  return(df)
+}
+
+data9_h <- to_numeric(data9_h)
+data11_h <- to_numeric(data11_h)
+
+# Filter: keep only valid trust scores 0–10
+valid_trust_filter <- function(df) {
+  df %>% filter(
+    trstprl %in% 0:10,
+    trstlgl %in% 0:10,
+    trstplc %in% 0:10,
+    trstplt %in% 0:10,
+    trstprt %in% 0:10,
+    trstep  %in% 0:10,
+    trstun  %in% 0:10
+  )
+}
+
+data9_h <- valid_trust_filter(data9_h)
+data11_h <- valid_trust_filter(data11_h)
+
+# Recode trust levels into 4 categories
+recode_trust <- function(x) {
+  factor(case_when(
+    x %in% 0:2  ~ 1,
+    x %in% 3:4  ~ 2,
+    x %in% 5:7  ~ 3,
+    x %in% 8:10 ~ 4
+  ), levels = 1:4, labels = c("Very low", "Low", "Moderate", "High"), ordered = TRUE)
+}
+
+apply_recode_trust <- function(df) {
+  for (var in trust_vars) {
+    df[[var]] <- recode_trust(df[[var]])
+  }
+  return(df)
+}
+
+data9_h <- apply_recode_trust(data9_h)
+data11_h <- apply_recode_trust(data11_h)
+
+summary(data9_h[,trust_vars])
+summary(data11_h[,trust_vars])
+
+rm(trust_vars,apply_recode_trust,valid_trust_filter,
+   recode_trust,to_numeric)
+
+```
+
+### Satisfaction
+```{r}
+# Define variables
+sat_vars <- c("stfeco", "stfgov", "stfdem", "stfedu", "stfhlth")
+
+# Step 1: Convert to numeric
+# Step 1: Convert to numeric
+to_numeric <- function(df) {
+  df[sat_vars] <- lapply(df[sat_vars], as.numeric)
+  return(df)
+}
+data9_h <- to_numeric(data9_h)
+data11_h <- to_numeric(data11_h)
+
+# Step 2: Filter valid values (0 to 10)
+filter_valid_satisfaction <- function(df) {
+  df %>% filter(
+    stfeco %in% 0:10,
+    stfgov %in% 0:10,
+    stfdem %in% 0:10,
+    stfedu %in% 0:10,
+    stfhlth %in% 0:10
+  )
+}
+data9_h <- filter_valid_satisfaction(data9_h)
+data11_h <- filter_valid_satisfaction(data11_h)
+
+# Step 3: Recode into 4 ordered categories
+recode_satisfaction <- function(x) {
+  factor(case_when(
+    x %in% 0:2  ~ 1,
+    x %in% 3:4  ~ 2,
+    x %in% 5:7  ~ 3,
+    x %in% 8:10 ~ 4
+  ), levels = 1:4, labels = c("Very dissatisfied", "Dissatisfied", "Satisfied", "Very satisfied"), ordered = TRUE)
+}
+
+apply_recode_satisfaction <- function(df) {
+  for (var in sat_vars) {
+    df[[var]] <- recode_satisfaction(df[[var]])
+  }
+  return(df)
+}
+data9_h <- apply_recode_satisfaction(data9_h)
+data11_h <- apply_recode_satisfaction(data11_h)
+
+summary(data9_h[,sat_vars])
+summary(data11_h[,sat_vars])
+
+rm(sat_vars, filter_valid_satisfaction, 
+   recode_satisfaction, apply_recode_satisfaction,to_numeric)
+
+```
+
+## OBSERVED COMMON VARIABLES
+
+### Gender
+```{r}
+data9_h$gndr <- as.numeric(data9_h$gndr)
+data11_h$gndr <- as.numeric(data11_h$gndr)
+
+# Step 2: Filter entire dataset to keep only values 1 and 2
+data9_h <- data9_h %>% filter(gndr %in% c(1, 2))
+data11_h <- data11_h %>% filter(gndr %in% c(1, 2))
+
+# Step 3: Convert to factor
+data9_h$gndr <- factor(data9_h$gndr, levels = 1:2, labels = c("Man", "Woman"))
+data11_h$gndr <- factor(data11_h$gndr, levels = 1:2, labels = c("Man", "Woman"))
+
+# Check summaries
+summary(data9_h$gndr)
+summary(data11_h$gndr)
+```
+
+
+### Age
+```{r}
+# Convert from labelled to plain numeric
+data9_h$agea <- as.numeric(data9_h$agea)
+data11_h$agea <- as.numeric(data11_h$agea)
+
+# Filter out bad values (including 666, 777 even if not labelled)
+invalid_ages <- c(666, 777, 999)
+
+data9_h <- data9_h %>% filter(!agea %in% invalid_ages)
+data11_h <- data11_h %>% filter(!agea %in% invalid_ages)
+data9_h <- data9_h %>% filter(!is.na(agea))
+data11_h <- data11_h %>% filter(!is.na(agea))
+
+# Check summaries
+summary(data9_h$agea)
+summary(data11_h$agea)
+
+rm(invalid_ages)
+```
+
+###  Legal marital status
+```{r}
+# Step 1: Convert to numeric
+data9_h$maritalb <- as.numeric(data9_h$maritalb)
+data11_h$maritalb <- as.numeric(data11_h$maritalb)
+
+# Step 2: Filter to keep only valid values (1 to 6)
+data9_h <- data9_h %>% filter(maritalb %in% 1:6)
+data11_h <- data11_h %>% filter(maritalb %in% 1:6)
+
+# Step 3: Collapse and relabel
+collapse_marital <- function(x) {
+  case_when(
+    x %in% c(1, 2) ~ 1,
+    x %in% c(3, 4, 5) ~ 2,
+    x == 6 ~ 3
+  )
+}
+
+data9_h$maritalb <- factor(collapse_marital(data9_h$maritalb),
+                             levels = 1:3, labels = c("Married or in union", "Separated or Divorced or Widowed", "None of these"))
+data11_h$maritalb <- factor(collapse_marital(data11_h$maritalb),
+                             levels = 1:3, labels = c("Married or in union", "Separated or Divorced or Widowed", "None of these"))
+
+# Check summaries
+summary(data9_h$maritalb)
+summary(data11_h$maritalb)
+
+rm(collapse_marital)
+```
+
+###  Domicile
+```{r}
+data9_h$domicil <- as.numeric(data9_h$domicil)
+data11_h$domicil <- as.numeric(data11_h$domicil)
+
+
+data9_h <- data9_h %>% filter(domicil %in% 1:5)
+data11_h <- data11_h %>% filter(domicil %in% 1:5)
+
+# Step 3: Collapse and relabel
+collapse_domicil <- function(x) {
+  case_when(
+    x %in% c(1, 2) ~ 1,
+    x ==3 ~ 2,
+    x %in% c(4, 5) ~ 3
+  )
+}
+
+# Step 3: Convert to ordered factor
+labels_domicil <- c("A big city or Suburbs or outskirts of big city",
+                    "Town or small city",
+                    "Country village or Farm or home in countryside")
+
+data9_h$domicil <- factor(collapse_domicil(data9_h$domicil), levels = 1:3, labels = labels_domicil, ordered = FALSE)
+data11_h$domicil <- factor(collapse_domicil(data11_h$domicil), levels = 1:3, labels = labels_domicil, ordered = FALSE)
+
+# Check summaries
+summary(data9_h$domicil)
+summary(data11_h$domicil)
+
+rm(labels_domicil,collapse_domicil)
+```
+
+
+###  Education
+```{r}
+# Step 1: Convert to numeric
+data9_h$eisced <- as.numeric(data9_h$eisced)
+data11_h$eisced <- as.numeric(data11_h$eisced)
+
+# Step 2: Keep only valid ISCED values 1 to 7
+data9_h <- data9_h %>% filter(eisced %in% 1:7)
+data11_h <- data11_h %>% filter(eisced %in% 1:7)
+
+# Step 3: Recode into ISCED I–II, III–IV, and V
+data9_h$eisced <- case_when(
+  data9_h$eisced %in% 1:2 ~ 1,
+  data9_h$eisced %in% 3:5 ~ 2,
+  data9_h$eisced %in% 6:7 ~ 3
+)
+
+data11_h$eisced <- case_when(
+  data11_h$eisced %in% 1:2 ~ 1,
+  data11_h$eisced %in% 3:5 ~ 2,
+  data11_h$eisced %in% 6:7 ~ 3
+)
+
+# Step 4: Convert to ordered factor
+eisced_grouped_levels <- c("ISCED I–II", "ISCED III–IV", "ISCED V")
+data9_h$eisced <- factor(data9_h$eisced, levels = 1:3, labels = eisced_grouped_levels, ordered = TRUE)
+data11_h$eisced <- factor(data11_h$eisced,levels = 1:3, labels = eisced_grouped_levels, ordered = TRUE)
+
+# Check summaries
+summary(data9_h$eisced)
+summary(data11_h$eisced)
+
+rm(eisced_grouped_levels)
+```
+
+### Occupation
+```{r}
+# Step 1: Convert to numeric
+data9_h$mnactic <- as.numeric(data9_h$mnactic)
+data11_h$mnactic <- as.numeric(data11_h$mnactic)
+
+# Step 2: Keep only valid values 1 to 9
+data9_h <- data9_h %>% filter(mnactic %in% 1:9)
+data11_h <- data11_h %>% filter(mnactic %in% 1:9)
+
+# Step 3: Recode to broader 5-level categories
+data9_h$mnactic <- case_when(
+  data9_h$mnactic == 1 ~ 1,
+  data9_h$mnactic == 6 ~ 2,
+  data9_h$mnactic %in% c(2,3,4,5,7,8,9) ~3)
+
+data11_h$mnactic <- case_when(
+  data11_h$mnactic == 1 ~ 1,
+  data11_h$mnactic == 6 ~ 2,
+  data11_h$mnactic %in% c(2,3,4,5,7,8,9) ~ 3
+)
+
+# Step 4: Convert to factor with desired levels
+mnactic_recode_levels <- c("Paid work", "Retired", "Others")
+data9_h$mnactic <- factor(data9_h$mnactic, levels = 1:3, 
+                           labels = mnactic_recode_levels)
+data11_h$mnactic <- factor(data11_h$mnactic, levels = 1:3, 
+                           labels = mnactic_recode_levels)
+
+# Check summaries
+summary(data9_h$mnactic)
+summary(data11_h$mnactic)
+
+rm(mnactic_recode_levels)
+```
+
+
+### Subjective income: economic difficulties
+```{r}
+# Step 1: Convert to numeric
+data9_h$hincfel <- as.numeric(data9_h$hincfel)
+data11_h$hincfel <- as.numeric(data11_h$hincfel)
+
+# Step 2: Filter valid values (1 to 4)
+data9_h <- data9_h %>% filter(hincfel %in% 1:4)
+data11_h <- data11_h %>% filter(hincfel %in% 1:4)
+
+data9_h$hincfel[data9_h$hincfel==4]=3
+data11_h$hincfel[data11_h$hincfel==4]=3
+
+# Step 3: Convert to ordered factor
+hincfel_labels <- c(
+  "Living comfortably",
+  "Coping",
+  "Difficult or Very difficult"
+)
+
+data9_h$hincfel <- factor(data9_h$hincfel, levels = 1:3, 
+                           labels = hincfel_labels, ordered = TRUE)
+data11_h$hincfel <- factor(data11_h$hincfel, levels = 1:3, 
+                           labels = hincfel_labels, ordered = TRUE)
+
+# Check summaries
+summary(data9_h$hincfel)
+summary(data11_h$hincfel)
+
+rm(hincfel_labels)
+```
+
+### Interest in politics
+```{r}
+# Step 1: Convert to numeric
+data9_h$polintr <- as.numeric(data9_h$polintr)
+data11_h$polintr <- as.numeric(data11_h$polintr)
+
+# Step 2: Filter valid values (1 to 4)
+data9_h <- data9_h %>% filter(polintr %in% 1:4)
+data11_h <- data11_h %>% filter(polintr %in% 1:4)
+
+# Step 3: Convert to ordered factor
+polintr_labels <- c(
+  "Very interested",
+  "Quite interested",
+  "Hardly interested",
+  "Not at all interested"
+)
+
+data9_h$polintr <- factor(data9_h$polintr, levels = 1:4, labels = polintr_labels, ordered = TRUE)
+data11_h$polintr <- factor(data11_h$polintr, levels = 1:4, labels = polintr_labels, ordered = TRUE)
+
+# Check summaries
+summary(data9_h$polintr)
+summary(data11_h$polintr)
+
+rm(polintr_labels)
+```
+
+
+### Voted last election
+```{r}
+# Step 1: Convert to numeric
+data9_h$vote <- as.numeric(data9_h$vote)
+data11_h$vote <- as.numeric(data11_h$vote)
+
+# Step 2: Keep only 1, 2, 3
+data9_h <- data9_h %>% filter(vote %in% 1:3)
+data11_h <- data11_h %>% filter(vote %in% 1:3)
+
+data9_h$vote[data9_h$vote==3]=2
+data11_h$vote[data11_h$vote==3]=2
+
+# Step 3: Recode as factor with all 3 levels
+data9_h$vote <- factor(data9_h$vote, levels = 1:2,
+                labels = c("Yes", "No or Not eligible to vote"))
+data11_h$vote <- factor(data11_h$vote, levels = 1:2,
+                labels = c("Yes",  "No or Not eligible to vote"))
+
+# Check summaries
+summary(data9_h$vote)
+summary(data11_h$vote)
+```
+
+
+### political position
+```{r}
+# Convert to numeric
+data9_h$lrscale <- as.numeric(data9_h$lrscale)
+data11_h$lrscale <- as.numeric(data11_h$lrscale)
+
+# Keep only valid responses (0 to 10)
+data9_h <- data9_h %>% filter(lrscale %in% 0:10)
+data11_h <- data11_h %>% filter(lrscale %in% 0:10)
+
+# Recode into three categories (Left, Center, Right), replacing lrscale
+data9_h <- data9_h %>%
+  mutate(lrscale = case_when(
+    lrscale >= 0 & lrscale <= 3 ~ 1,
+    lrscale >= 4 & lrscale <= 6 ~ 2,
+    lrscale >= 7 & lrscale <= 10 ~ 3
+  )) %>%
+  mutate(lrscale = factor(lrscale, levels = 1:3, 
+                          labels = c("Left", "Center", "Right")))
+
+data11_h <- data11_h %>%
+  mutate(lrscale = case_when(
+    lrscale >= 0 & lrscale <= 3 ~ 1,
+    lrscale >= 4 & lrscale <= 6 ~ 2,
+    lrscale >= 7 & lrscale <= 10 ~ 3
+  )) %>%
+  mutate(lrscale = factor(lrscale, levels = 1:3, 
+                          labels =  c("Left", "Center", "Right")))
+
+# Check summaries
+summary(data9_h$lrscale)
+summary(data11_h$lrscale)
+```
+
+
+### Life Satisfaction
+```{r}
+# Convert to numeric
+# Convert to numeric
+data9_h$stflife <- as.numeric(data9_h$stflife)
+data11_h$stflife <- as.numeric(data11_h$stflife)
+
+# Keep only valid responses (0–10)
+data9_h <- data9_h %>% filter(stflife %in% 0:10)
+data11_h <- data11_h %>% filter(stflife %in% 0:10)
+
+# Recode into 3-level ordered factor
+data9_h <- data9_h %>%
+  mutate(stflife = case_when(
+    stflife %in% 0:5 ~ 1,
+    stflife %in% 6:8 ~ 2,
+    stflife %in% 9:10 ~ 3
+  ),
+  stflife = factor(stflife,
+                   levels = 1:3, labels = 
+                     c("Not at all or Not very satisfied",
+                              "Fairly satisfied",
+                              "Very satisfied"),
+                   ordered = TRUE)
+)
+
+data11_h <- data11_h %>%
+  mutate(stflife = case_when(
+  stflife %in% 0:5 ~ 1,
+    stflife %in% 6:8 ~ 2,
+    stflife %in% 9:10 ~ 3
+  ),
+  stflife = factor(stflife,
+                   levels = 1:3, labels = 
+                     c("Not at all or Not very satisfied",
+                              "Fairly satisfied",
+                              "Very satisfied"),
+                   ordered = TRUE)
+)
+
+# Check summaries
+summary(data9_h$stflife)
+summary(data11_h$stflife)
+```
+
+
+### happy
+```{r}
+# Step 1: Convert to numeric
+data9_h$happy <- as.numeric(data9_h$happy)
+data11_h$happy <- as.numeric(data11_h$happy)
+
+# Step 2: Keep only valid responses (0–10)
+data9_h <- data9_h %>% filter(happy %in% 0:10)
+data11_h <- data11_h %>% filter(happy %in% 0:10)
+
+# Step 3: Recode into 4-level ordered factor
+data9_h <- data9_h %>%
+  mutate(happy = case_when(
+    happy %in% 0:6 ~ 1,
+    happy %in% 7:8 ~ 2,
+    happy %in% 9:10 ~ 3
+  ),
+  happy = factor(happy,
+                 levels = 1:3, labels = c(
+                            "Not happy",
+                            "Fairly happy",
+                            "Very happy"),
+                 ordered = TRUE)
+)
+
+data11_h <- data11_h %>%
+  mutate(happy = case_when(
+    happy %in% 0:6 ~ 1,
+    happy %in% 7:8 ~ 2,
+    happy %in% 9:10 ~ 3
+  ),
+  happy = factor(happy,
+                 levels = 1:3, labels = c(
+                            "Not happy",
+                            "Fairly happy",
+                            "Very happy"),
+                 ordered = TRUE)
+)
+
+# Check summaries
+summary(data9_h$happy)
+summary(data11_h$happy)
+```
+
+
+## attachment to country and to EU
+```{r}
+# Convert to numeric
+data9_h$atchctr <- as.numeric(data9_h$atchctr)
+data9_h$atcherp <- as.numeric(data9_h$atcherp)
+data11_h$atchctr <- as.numeric(data11_h$atchctr)
+data11_h$atcherp <- as.numeric(data11_h$atcherp)
+
+# Filter only valid responses (0–10)
+data9_h <- data9_h %>% filter(atchctr %in% 0:10, atcherp %in% 0:10)
+data11_h <- data11_h %>% filter(atchctr %in% 0:10, atcherp %in% 0:10)
+
+# Recode as ordered factor for data9_h
+data9_h <- data9_h %>%
+  mutate(
+    atchctr = case_when(
+      atchctr %in% 0:5 ~ 1,
+      atchctr %in% 6:8 ~ 2,
+      atchctr %in% 9:10 ~ 3
+    ),
+    atcherp = case_when(
+      atcherp %in% 0:5 ~ 1,
+      atcherp %in% 6:8 ~ 2,
+      atcherp %in% 9:10 ~ 3
+    ),
+    atchctr = factor(atchctr,
+                     levels = 1:3, 
+                     labels = c("Not  attached",
+                                "Fairly attached", "Very attached"),
+                     ordered = TRUE),
+    atcherp = factor(atcherp,
+                     levels = 1:3, 
+                     labels = c("Not  attached",
+                                "Fairly attached", "Very attached"),
+                     ordered = TRUE)
+  )
+
+# Recode as ordered factor for data11_h
+data11_h <- data11_h %>%
+  mutate(
+    atchctr = case_when(
+      atchctr %in% 0:5 ~ 1,
+      atchctr %in% 6:8 ~ 2,
+      atchctr %in% 9:10 ~ 3
+    ),
+    atcherp = case_when(
+      atcherp %in% 0:5 ~ 1,
+      atcherp %in% 6:8 ~ 2,
+      atcherp %in% 9:10 ~ 3
+    ),
+    atchctr = factor(atchctr,
+                     levels = 1:3, 
+                     labels = c("Not  attached",
+                                "Fairly attached", "Very attached"),
+                     ordered = TRUE),
+    atcherp = factor(atcherp,
+                     levels = 1:3, 
+                     labels = c("Not  attached",
+                                "Fairly attached", "Very attached"),
+                     ordered = TRUE)
+  )
+
+summary(data9_h$atchctr)
+summary(data11_h$atchctr)
+
+summary(data9_h$atcherp)
+summary(data11_h$atcherp)
+```
+
+
+
+### religious
+```{r}
+# Convert to numeric
+data9_h$rlgdgr <- as.numeric(data9_h$rlgdgr)
+data11_h$rlgdgr <- as.numeric(data11_h$rlgdgr)
+
+# Filter valid range
+data9_h <- data9_h %>% filter(rlgdgr %in% 0:10)
+data11_h <- data11_h %>% filter(rlgdgr %in% 0:10)
+
+# Recode for data9_h
+data9_h <- data9_h %>%
+  mutate(rlgdgr = case_when(
+    rlgdgr %in% 0:5 ~ 1,
+    rlgdgr %in% 6:10 ~ 2),
+  rlgdgr = factor(rlgdgr,
+                  levels = 1:2, labels = 
+                    c("Not at all  or Somewhat religious",
+                             "Quite  or Very religious"),
+                  ordered = TRUE)
+)
+
+# Recode for data11_h
+data11_h <- data11_h %>%
+  mutate(rlgdgr = case_when(
+    rlgdgr %in% 0:5 ~ 1,
+    rlgdgr %in% 6:10 ~ 2),
+  rlgdgr = factor(rlgdgr,
+                  levels = 1:2, 
+                  labels = c("Not at all  or Somewhat religious",
+                             "Quite  or Very religious"),
+                  ordered = TRUE)
+)
+
+summary(data9_h$rlgdgr)
+summary(data11_h$rlgdgr)
+```
+
+
+### discriminated group
+```{r}
+# Convert to numeric
+data9_h$dscrgrp <- as.numeric(data9_h$dscrgrp)
+data11_h$dscrgrp <- as.numeric(data11_h$dscrgrp)
+
+# Filter valid responses
+data9_h <- data9_h %>% filter(dscrgrp %in% c(1, 2))
+data11_h <- data11_h %>% filter(dscrgrp %in% c(1, 2))
+
+# Recode as factor
+data9_h$dscrgrp <- factor(data9_h$dscrgrp, levels = c(1, 2), 
+                           labels = c("Yes", "No"))
+data11_h$dscrgrp <- factor(data11_h$dscrgrp, levels = c(1, 2), 
+                           labels = c("Yes", "No"))
+
+summary(data9_h$dscrgrp)
+summary(data11_h$dscrgrp)
+```
+
+
+## COMMON LATENT VARIABLES
+
+### Trust in people
+```{r}
+# Convert to numeric
+data9_h$ppltrst <- as.numeric(data9_h$ppltrst)
+data9_h$pplfair <- as.numeric(data9_h$pplfair)
+data9_h$pplhlp  <- as.numeric(data9_h$pplhlp)
+
+data11_h$ppltrst <- as.numeric(data11_h$ppltrst)
+data11_h$pplfair <- as.numeric(data11_h$pplfair)
+data11_h$pplhlp  <- as.numeric(data11_h$pplhlp)
+
+# Filter valid values (0–10)
+data9_h <- data9_h %>% filter(ppltrst %in% 0:10, pplfair %in% 0:10, pplhlp %in% 0:10)
+data11_h <- data11_h %>% filter(ppltrst %in% 0:10, pplfair %in% 0:10, pplhlp %in% 0:10)
+
+# Recode to 4 ordered categories
+recode_trust_var <- function(x) {
+  factor(case_when(
+    x %in% 0:2  ~ 1,
+    x %in% 3:5  ~ 2,
+    x %in% 6:8  ~ 3,
+    x %in% 9:10 ~ 4
+  ), levels = 1:4, ordered = TRUE,
+  labels = c("Very low", "Low", "High", "Very high"))
+}
+
+data9_h$ppltrst <- recode_trust_var(data9_h$ppltrst)
+data9_h$pplfair <- recode_trust_var(data9_h$pplfair)
+data9_h$pplhlp  <- recode_trust_var(data9_h$pplhlp)
+
+data11_h$ppltrst <- recode_trust_var(data11_h$ppltrst)
+data11_h$pplfair <- recode_trust_var(data11_h$pplfair)
+data11_h$pplhlp  <- recode_trust_var(data11_h$pplhlp)
+
+summary(data9_h[,c("ppltrst","pplfair","pplhlp")])
+summary(data11_h[,c("ppltrst","pplfair","pplhlp")])
+rm(recode_trust_var)
+```
+
+
+### Political participation
+```{r}
+# Convert to numeric
+to_numeric <- function(df) {
+  df$psppsgva <- as.numeric(df$psppsgva)
+  df$actrolga <- as.numeric(df$actrolga)
+  df$psppipla <- as.numeric(df$psppipla)
+  df$cptppola <- as.numeric(df$cptppola)
+  df
+}
+
+data9_h <- to_numeric(data9_h)
+data11_h <- to_numeric(data11_h)
+
+# Filter valid range (1 to 5)
+filter_valid <- function(df) {
+  df %>%
+    filter(
+      psppsgva %in% 1:5,
+      actrolga %in% 1:5,
+      psppipla %in% 1:5,
+      cptppola %in% 1:5
+    )
+}
+
+data9_h <- filter_valid(data9_h)
+data11_h <- filter_valid(data11_h)
+
+# Recode to 3 levels
+recode_4level <- function(x) {
+  factor(case_when(
+    x %in% 1 ~ 1,
+    x == 2     ~ 2,
+    x == 3     ~ 3,
+    x %in% 4:5 ~ 4
+  ), levels = 1:4, labels = c("Not at all", "Very little", "Some","A lot"), ordered = TRUE)
+}
+
+# Apply recoding
+apply_recode <- function(df) {
+  df$psppsgva <- recode_4level(df$psppsgva)
+  df$actrolga <- recode_4level(df$actrolga)
+  df$psppipla <- recode_4level(df$psppipla)
+  df$cptppola <- recode_4level(df$cptppola)
+  df
+}
+
+data9_h <- apply_recode(data9_h)
+data11_h <- apply_recode(data11_h)
+
+summary(data9_h[,c("psppsgva","actrolga","psppipla","cptppola")])
+summary(data11_h[,c("psppsgva","actrolga","psppipla","cptppola")])
+
+rm(apply_recode,recode_4level,filter_valid,to_numeric)
+```
+
+
+
+### Human Value Scale
+```{r}
+# Updated list of value orientation variables
+value_vars <- c(
+  "impsafe", "imptrad", "ipbhprp", "ipfrule", "ipmodst", "ipstrgv", "impdiff", "impfree",
+  "impfun", "ipadvnt", "ipcrtiv", "ipgdtim", "imprich", "iprspot", "ipshabt", "ipsuces",
+  "impenv", "ipeqopt", "iphlppl", "iplylfr", "ipudrst"
+)
+
+
+
+# Recode for both data9_h and data11_h
+for (var in value_vars) {
+  # Convert to numeric
+  data9_h[[var]] <- as.numeric(data9_h[[var]])
+  data11_h[[var]] <- as.numeric(data11_h[[var]])
+  
+  # Recode 6 → 5 (combine categories 5 and 6)
+  data9_h[[var]][data9_h[[var]] == 6] <- 5
+  data11_h[[var]][data11_h[[var]] == 6] <- 5
+  
+  # Filter valid range (1–5)
+  data9_h <- data9_h %>% filter(.data[[var]] %in% 1:5)
+  data11_h <- data11_h %>% filter(.data[[var]] %in% 1:5)
+}
+
+# Define new labels (5 levels)
+value_labels <- c(
+  "Very much like me", "Like me", "Somewhat like me", 
+  "A little like me", "Not like me"
+)
+for (var in value_vars) {
+  
+data9_h[[var]] <- 6-data9_h[[var]] 
+data11_h[[var]] <- 6-data11_h[[var]]
+  # Assign labels (reversed)
+  data9_h[[var]] <- factor(data9_h[[var]], levels = 1:5, labels = rev(value_labels), ordered = TRUE)
+  data11_h[[var]] <- factor(data11_h[[var]], levels = 1:5, labels = rev(value_labels), ordered = TRUE)
+}
+
+# Check summaries
+summary(data9_h[, value_vars])
+summary(data11_h[, value_vars])
+
+rm(value_labels,var,value_vars)
+
+```
+
+```{r}
+data9_h <- data9_h %>%
+  rename(
+    Country=cntry,
+    Gender=gndr,
+    Age = agea,
+    Marital_status = maritalb,
+    Domicile = domicil,
+    Education = eisced,
+    Occupation = mnactic,
+    Subjective_income = hincfel,
+    Interested_politics = polintr,
+    Voted = vote,
+    Political_position = lrscale,
+    Life_satisfaction = stflife,
+    Happy = happy,
+    Attachment_country = atchctr,
+    Attachment_EU = atcherp,
+    Religious = rlgdgr,
+    Discriminated_group = dscrgrp,
+    People_trusted = ppltrst,
+    People_advantage = pplfair,
+    People_helpful = pplhlp,
+    People_political_participation = psppsgva,
+    Active_political = actrolga,
+    People_influence = psppipla,
+    Confident_participation = cptppola,
+    Trust_Parliament = trstprl,
+    Trust_Legalsystem = trstlgl,
+    Trust_police = trstplc,
+    Trust_politician = trstplt,
+    Trust_politicalparties = trstprt,
+    Trust_EU = trstep,
+    Trust_UN = trstun,
+    Economy_satisfaction = stfeco,
+    Government_satisfaction = stfgov,
+    Democracy_satisfaction = stfdem,
+    Education_satisfaction = stfedu,
+    Health_satisfaction = stfhlth,
+    Conservation_1 = impsafe,
+    Conservation_2 = imptrad,
+    Conservation_3 = ipbhprp,
+    Conservation_4 = ipfrule,
+    Conservation_5 = ipmodst,
+    Conservation_6 = ipstrgv,
+    Openness_to_change_1 = impdiff,
+    Openness_to_change_2 = impfree,
+    Openness_to_change_3 = impfun,
+    Openness_to_change_4 = ipadvnt,
+    Openness_to_change_5 = ipcrtiv,
+    Openness_to_change_6 = ipgdtim,
+    Self_enhancement_1 = imprich,
+    Self_enhancement_2 = iprspot,
+    Self_enhancement_3 = ipshabt,
+    Self_enhancement_4 = ipsuces,
+    Self_transcendence_1 = impenv,
+    Self_transcendence_2 = ipeqopt,
+    Self_transcendence_3 = iphlppl,
+    Self_transcendence_4 = iplylfr,
+    Self_transcendence_5 = ipudrst,
+    Sample_weight = anweight
+  )
+```
+
+```{r}
+data11_h <- data11_h %>%
+  rename(
+    Country=cntry,
+    Gender=gndr,
+    Age = agea,
+    Marital_status = maritalb,
+    Domicile = domicil,
+    Education = eisced,
+    Occupation = mnactic,
+    Subjective_income = hincfel,
+    Interested_politics = polintr,
+    Voted = vote,
+    Political_position = lrscale,
+    Life_satisfaction = stflife,
+    Happy = happy,
+    Attachment_country = atchctr,
+    Attachment_EU = atcherp,
+    Religious = rlgdgr,
+    Discriminated_group = dscrgrp,
+    People_trusted = ppltrst,
+    People_advantage = pplfair,
+    People_helpful = pplhlp,
+    People_political_participation = psppsgva,
+    Active_political = actrolga,
+    People_influence = psppipla,
+    Confident_participation = cptppola,
+    Trust_Parliament = trstprl,
+    Trust_Legalsystem = trstlgl,
+    Trust_police = trstplc,
+    Trust_politician = trstplt,
+    Trust_politicalparties = trstprt,
+    Trust_EU = trstep,
+    Trust_UN = trstun,
+    Economy_satisfaction = stfeco,
+    Government_satisfaction = stfgov,
+    Democracy_satisfaction = stfdem,
+    Education_satisfaction = stfedu,
+    Health_satisfaction = stfhlth,
+    Conservation_1 = impsafe,
+    Conservation_2 = imptrad,
+    Conservation_3 = ipbhprp,
+    Conservation_4 = ipfrule,
+    Conservation_5 = ipmodst,
+    Conservation_6 = ipstrgv,
+    Openness_to_change_1 = impdiff,
+    Openness_to_change_2 = impfree,
+    Openness_to_change_3 = impfun,
+    Openness_to_change_4 = ipadvnt,
+    Openness_to_change_5 = ipcrtiv,
+    Openness_to_change_6 = ipgdtim,
+    Self_enhancement_1 = imprich,
+    Self_enhancement_2 = iprspot,
+    Self_enhancement_3 = ipshabt,
+    Self_enhancement_4 = ipsuces,
+    Self_transcendence_1 = impenv,
+    Self_transcendence_2 = ipeqopt,
+    Self_transcendence_3 = iphlppl,
+    Self_transcendence_4 = iplylfr,
+    Self_transcendence_5 = ipudrst,
+    Sample_weight = anweight
+  )
+```
+
+#### Latent dimensions
+```{r}
+TRUST_PEOPLE <- c("People_trusted", "People_advantage", "People_helpful")
+
+POLITICAL_PARTECIPATION <- c(
+  "People_political_participation",
+  "Active_political",
+  "People_influence",
+  "Confident_partecipation"
+)
+
+TRUST_INSTITUTION <- c(
+  "Trust_Parliament",
+  "Trust_Legalsystem",
+  "Trust_police",
+  "Trust_politician",
+  "Trust_politicalparties",
+  "Trust_EU",
+  "Trust_UN"
+)
+
+SATISFACTION <- c(
+  "Economy_satisfaction",
+  "Government_satisfaction",
+  "Democracy_satisfaction",
+  "Education_satisfaction",
+  "Health_satisfaction"
+)
+
+HVS_CONSERVATION <- c(
+  "Conservation_1",
+  "Conservation_2",
+  "Conservation_3",
+  "Conservation_4",
+  "Conservation_5",
+  "Conservation_6"
+)
+
+HVS_OPENNESS <- c(
+  "Openness_to_change_1",
+  "Openness_to_change_2",
+  "Openness_to_change_3",
+  "Openness_to_change_4",
+  "Openness_to_change_5",
+  "Openness_to_change_6"
+)
+
+HVS_ENHANCEMENT <- c(
+  "Self_enhancement_1",
+  "Self_enhancement_2",
+  "Self_enhancement_3",
+  "Self_enhancement_4"
+)
+
+
+HVS_TRANSCENDENCE <- c(
+  "Self_transcendence_1",
+  "Self_transcendence_2",
+  "Self_transcendence_3",
+  "Self_transcendence_4",
+  "Self_transcendence_5"
+)
+
+
+```
+
+```{r}
+save.image("h_ENCLOSE_data_panel.RData")
+```

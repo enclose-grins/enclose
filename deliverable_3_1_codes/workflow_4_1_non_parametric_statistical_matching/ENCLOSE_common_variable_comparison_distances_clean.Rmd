@@ -1,0 +1,236 @@
+---
+title: "Common variables Comparison: ESS vs Eurobarometer"
+author: "ENCLOSE project"
+output:
+  html_document:
+    code_folding: show
+    toc_depth: 3
+    number_sections: true
+    toc_float: true
+    toc: true
+    df_print: paged
+  pdf_document: default
+---
+```{r packages}
+# Packages
+if (!requireNamespace('StatMatch', quietly = TRUE)) install.packages('StatMatch')
+library(StatMatch)
+if (!requireNamespace('dplyr', quietly = TRUE)) install.packages('dplyr')
+library(dplyr)
+if (!requireNamespace('openxlsx', quietly = TRUE)) install.packages('openxlsx')
+library(openxlsx)
+if (!requireNamespace('writexl', quietly = TRUE)) install.packages('writexl')
+library(writexl)
+```
+
+```{r setup, include=FALSE}
+library(StatMatch)
+library(writexl)
+library(openxlsx)
+library(dplyr)
+```
+
+# Load data
+```{r load-data-001}
+load("ENCLOSE_harmonized_data.RData")
+country=rownames(table(combined_data$Country,combined_data$Country))
+
+rm(list = setdiff(ls(), c("country","combined_data")))
+
+# Split datasets
+data_ESS <- combined_data %>% filter(source == "ESS")
+data_ZA <- combined_data %>% filter(source == "ZA")
+
+```
+
+# Function to compute comparison statistics for categorical data
+```{r function-to-compute-comparison-statistics-for-categorical-data-002, warning=FALSE}
+compare_categorical_distributions_with_country <- function(data_ESS, data_ZA, variable, country_codes, country_names) {
+  # Initialize a list to store the results
+  results <- list()
+
+  # Compute overall distribution (ESS vs ZA)
+  p <- prop.table(table(data_ESS[[variable]]))
+  q <- prop.table(table(data_ZA[[variable]]))
+
+  # Align both tables to all levels (in case one dataset has more levels)
+  all_levels <- union(names(p), names(q))
+  p <- p[all_levels]; p[is.na(p)] <- 0
+  q <- q[all_levels]; q[is.na(q)] <- 0
+
+  # SM measures
+  sm_com <- comp.prop(p, q, n1 = nrow(data_ESS), n2 = nrow(data_ZA), ref = FALSE)
+
+
+  # Store the overall results
+  results[[1]] <- data.frame(
+    country = "Overall",
+    variable = variable,
+    tvd.SM = sm_com[[1]][1],
+    overlap.SM = sm_com[[1]][2],
+    Bhatt.SM = sm_com[[1]][3],
+    Hell.SM = sm_com[[1]][4],
+    chisquare.SM = sm_com[[2]][1],
+    df.SM = sm_com[[2]][2],
+    q0.05.SM = sm_com[[2]][3],
+    delta.h0.SM = sm_com[[2]][4]
+  )
+
+  # Country-specific results
+  for (i in country_codes) {
+    ess_country <- data_ESS[data_ESS$Country_code == i, ]
+    za_country  <- data_ZA[data_ZA$Country_code == i, ]
+
+    if (nrow(ess_country) > 0 && nrow(za_country) > 0) {
+      p_country <- prop.table(table(ess_country[[variable]]))
+      q_country <- prop.table(table(za_country[[variable]]))
+
+      p_country <- p_country[all_levels]; p_country[is.na(p_country)] <- 0
+      q_country <- q_country[all_levels]; q_country[is.na(q_country)] <- 0
+
+      sm_com <- comp.prop(p_country, q_country,
+                          n1 = nrow(ess_country),
+                          n2 = nrow(za_country), ref = FALSE)
+
+
+      results[[length(results) + 1]] <- data.frame(
+        country = country_names[which(country_codes == i)],
+        variable = variable,
+        tvd.SM = sm_com[[1]][1],
+        overlap.SM = sm_com[[1]][2],
+        Bhatt.SM = sm_com[[1]][3],
+        Hell.SM = sm_com[[1]][4],
+        chisquare.SM = sm_com[[2]][1],
+        df.SM = sm_com[[2]][2],
+        q0.05.SM = sm_com[[2]][3],
+        delta.h0.SM = sm_com[[2]][4]
+      )
+    }
+  }
+
+  # Return combined results
+  final_results <- do.call(rbind, results)
+  return(final_results)
+}
+
+```
+
+
+# Gender
+```{r gender-003}
+(gender_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Gender", country_codes=1:16,country_names=country))
+```
+
+# Occupation
+```{r occupation-004}
+(Occupation_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Occupation", country_codes=1:16,country_names=country))
+```
+
+# Domicile
+```{r domicile-005}
+(Domicile_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Domicile", country_codes=1:16,country_names=country))
+```
+
+# Economic Difficulties
+```{r economic-difficulties-006}
+(Subjective_income_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Subjective_income", country_codes=1:16,country_names=country))
+```
+
+# Political Orientation
+```{r political-orientation-007}
+(Political_Orientation_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Political_Orientation", country_codes=1:16,country_names=country))
+```
+
+# Attachment to country
+```{r attachment-to-country-008}
+(Attachment_country_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Attachment_country", country_codes=1:16,country_names=country))
+```
+
+# Life Satisfaction
+```{r life-satisfaction-009}
+(Life_Satisfaction_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Life_Satisfaction", country_codes=1:16,country_names=country))
+```
+
+# Economy Satisfaction
+```{r economy-satisfaction-010}
+(Economy_Satisfaction_distance=compare_categorical_distributions_with_country(data_ESS, data_ZA, variable = "Economy_Satisfaction", country_codes=1:16,country_names=country))
+```
+
+
+
+#### ###
+# Function to compute comparison statistic for continuous data
+```{r function-to-compute-comparison-statistic-for-continuous-data-011, warning=FALSE}
+compare_distributions_with_country <- function(data_ESS, data_ZA, variable, country_codes, country_names = NULL, bins = 50) {
+  results <- list()
+
+  sm <- comp.cont(data_ESS, data_ZA, xlab.A = variable, xlab.B = variable, w.A = NULL, w.B = NULL, ref = FALSE)
+
+
+  results[[1]] <- data.frame(
+    country = "Overall",
+    variable = variable,
+    avAbsD_SM = sm[[2]][1],
+    avSqrtSqD.SM = sm[[2]][2],
+    KSdist.SM = sm[[3]][1],
+    Kuiper.SM = sm[[3]][2],
+    avAbsDiff.SM = sm[[3]][3],
+    tvd.SM = sm[[4]][1],
+    overlap.SM = sm[[4]][2],
+    Hellinger.SM = sm[[4]][3]
+  )
+
+  # Country-specific comparisons
+  for (i in country_codes) {
+    ess_country <- data_ESS[data_ESS$Country_code == i, ]
+    za_country  <- data_ZA[data_ZA$Country_code == i, ]
+
+    # Skip if insufficient data
+    if (nrow(ess_country) < 2 || nrow(za_country) < 2) next
+
+    sm <- comp.cont(ess_country, za_country, xlab.A = variable, xlab.B = variable, w.A = NULL, w.B = NULL, ref = FALSE)
+
+
+    cname <- if (!is.null(country_names)) country_names[which(country_codes == i)] else paste("Country", i)
+
+    results[[length(results) + 1]] <- data.frame(
+      country = cname,
+      variable = variable,
+      avAbsD_SM = sm[[2]][1],
+      avSqrtSqD.SM = sm[[2]][2],
+      KSdist.SM = sm[[3]][1],
+      Kuiper.SM = sm[[3]][2],
+      avAbsDiff.SM = sm[[3]][3],
+      tvd.SM = sm[[4]][1],
+      overlap.SM = sm[[4]][2],
+      Hellinger.SM = sm[[4]][3]
+    )
+  }
+
+  return(do.call(rbind, results))
+}
+```
+
+```{r function-to-compute-comparison-statistic-for-continuous-data-012}
+(age_distance=compare_distributions_with_country (data_ESS, data_ZA, "Age", country_codes=1:16,country_names=country, bins = 50))
+```
+
+
+```{r function-to-compute-comparison-statistic-for-continuous-data-013}
+(TRUST_distance=compare_distributions_with_country (data_ESS, data_ZA, "TRUST", country_codes=1:16,country_names=country, bins = 50))
+```
+
+
+```{r function-to-compute-comparison-statistic-for-continuous-data-014, warning=F}
+write.xlsx(list(gender_distance = gender_distance,
+    Occupation_distance = Occupation_distance,
+     Domicile_distance = Domicile_distance,
+     Subjective_income_distance = Subjective_income_distance,
+    Political_Orientation_distance=Political_Orientation_distance,
+    Attachment_country_distance=Attachment_country_distance,
+    Life_Satisfaction_distance=Life_Satisfaction_distance,
+    Economy_Satisfaction_distance=Economy_Satisfaction_distance,
+    age_distance=age_distance,
+    TRUST_distance=TRUST_distance),
+    file = "covariate_distance.xlsx", rowNames = TRUE)
+```

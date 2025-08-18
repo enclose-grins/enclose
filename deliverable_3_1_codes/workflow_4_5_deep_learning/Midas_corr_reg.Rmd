@@ -1,0 +1,497 @@
+---
+title: "MIDAS_regression_&_comparison"
+output: html_document
+date: "2025-08-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Plot
+
+
+```{r}
+load("Rmidas_ENV.RData")
+mice.theme <- function(transparent = TRUE, alpha.fill = 0.3) {
+  filler <- function(transparent, alpha) {
+    if (transparent) {
+      return(c(
+        grDevices::hcl(240, 100, 40, alpha),
+        grDevices::hcl(0, 100, 40, alpha)
+      ))
+    }
+    return(c(grDevices::hcl(240, 100, 40), grDevices::hcl(0, 100, 40)))
+  }
+  if (missing(transparent)) transparent <- supports.transparent()
+  if (missing(alpha.fill)) alpha.fill <- ifelse(transparent, 0.3, 0)
+  list(
+    superpose.symbol = list(
+      col = mdc(1:2),
+      fill = filler(transparent, alpha.fill),
+      pch = 1
+    ),
+    superpose.line = list(
+      col = mdc(4:5),
+      lwd = 1
+    ),
+    box.dot = list(
+      col = mdc(1:2)
+    ),
+    box.rectangle = list(
+      col = mdc(4:5)
+    ),
+    box.symbol = list(
+      col = mdc(1:2)
+    ),
+    plot.symbol = list(
+      col = mdc(1:2),
+      fill = filler(transparent, alpha.fill),
+      pch = 1
+    ),
+    plot.line = list(
+      col = mdc(4:5)
+    ),
+    superpose.polygon = list(
+      col = filler(transparent, alpha.fill)
+    ),
+    strip.background = list(
+      col = "grey95"
+    ),
+    mice = list(
+      flag = TRUE
+    )
+  )
+}
+m=10
+
+dd_for_graph=c(combined_data_or[combined_data_or$source=="ESS",]$ALLOW,combined_data_or[combined_data_or$source=="ESS",]$FEELING)
+dd_for_graph=cbind("value"=dd_for_graph,'vars'=c(rep('Immigration rejection',nrow(combined_data_or[combined_data_or$source=="ESS",])),rep('Perceived benefits of migration',nrow(combined_data_or[combined_data_or$source=="ESS",]))))
+dd_for_graph=as.data.frame(dd_for_graph)
+dd_for_graph$group='original'
+for( i in 1:m){
+  ab=c(imputations[[i]][combined_data_or$source!="ESS",]$ALLOW,imputations[[i]][combined_data_or$source!="ESS",]$FEELING)
+  ab=cbind("value"=ab,'vars'=c(rep('Immigration rejection',nrow(imputations[[i]][combined_data_or$source!="ESS",])),rep('Perceived benefits of migration',nrow(imputations[[i]][combined_data_or$source!="ESS",]))))
+  ab=as.data.frame(ab)
+  ab$group=paste('imputed', i)
+  dd_for_graph=rbind(dd_for_graph,ab)
+}
+
+library(mice)
+
+tp <- densityplot(~ value | vars,
+                  
+                  group = group,
+                  
+                  data = dd_for_graph,
+                  
+                  plot.points = FALSE,
+                  
+                  scales = list(relation = "free", y = list(relation = 'same')),
+                  
+                  xlab = "",
+                  
+                  ylab = "Density",
+                  
+                  lwd = 1,
+                  
+                  layout = c(2, 1),
+                  
+                  between = list(x = 0),
+                  
+                  col = rep(c( rep("red",10),"black" ),2)
+                  
+)  # Show legend
+
+
+
+tp <- update(tp, par.settings = mice.theme())
+
+print(tp)
+
+
+
+#la=max(which(imp_2lnorm$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in 1:length(unique(combined_data$Country_code))){
+  
+  plot(density(na.omit(combined_data$ALLOW[combined_data$Country_code==cou])),
+       main=country[cou],xlab='',ylim=c(0,1.3))
+  for(j in 1:10){
+    lines( density(imputations_c[[cou]][[j]]$ALLOW[split_source[[cou]]$sou=='ZA']  ),col='red')
+  }
+}
+
+
+
+
+##########
+
+for(cou in 1:length(unique(combined_data$Country_code))){
+  
+  plot(density(na.omit(combined_data$FEELING[combined_data$Country_code==cou])),
+       main=country[cou],xlab='',ylim=c(0,1.3))
+  for(j in 1:10){
+    lines( density(imputations_c[[cou]][[j]]$FEELING[split_source[[cou]]$sou=='ZA']   ),col='red')
+  }
+}
+
+
+
+
+```
+
+
+
+
+## Pooled correlation
+```{r pooledcorr}
+
+#' Pool correlations from multiply imputed data using Fisher's Z transformation
+#'
+#' @param corr_list A list of correlations (typically from with() on a mids object)
+#' @param m The number of imputations (optional, inferred from length if NULL)
+#'
+#' @return A named numeric vector: pooled correlation and 95% CI
+pool_corr_fisher <- function(corr_list, m = NULL) {
+  z_values <- atanh(unlist(corr_list))  # Fisher's Z-transform
+  
+  if (is.null(m)) m <- length(z_values)
+  
+  z_bar <- mean(z_values)               # Mean of transformed correlations
+  within_var <- var(z_values)           # Within-imputation variance
+  between_var <- 0                      # Between-var is 0 since cor is deterministic
+  
+  total_var <- within_var * (1 + 1 / m) # Rubin's rules
+  
+  pooled_r <- tanh(z_bar)               # Back-transform
+  se <- sqrt(total_var)
+  ci_lower <- tanh(z_bar - 1.96 * se)
+  ci_upper <- tanh(z_bar + 1.96 * se)
+  
+  return(cbind(pooled_r = pooled_r, ci_lower = ci_lower, ci_upper = ci_upper))
+}
+```
+
+
+######Eurosk
+
+
+```{r}
+
+
+###############correlazione Overall
+
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("COMMONPOLICY"=combined_data_or$COMMONPOLICY[combined_data_or$source=="ZA"],"ALLOW"=imputations[[i]]$ALLOW[combined_data_or$source=="ZA"])
+  co[[i]]=cor(ddd[[i]]$COMMONPOLICY, ddd[[i]]$ALLOW)
+}
+
+pool_corr=pool_corr_fisher(co)
+corr_allow=pool_corr
+colnames(corr_allow) <- c("Midas","2.5%","97.5%")
+write.csv(corr_allow,file='policy_corr_allow_midas.csv',row.names = TRUE)
+
+#rm(corr_2lnorm,pool_corr)
+```
+
+```{r}
+### Correlazione per country
+cou=unique(combined_data_or$Country_code)[1]
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("COMMONPOLICY"=combined_data_or$COMMONPOLICY[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"ALLOW"=imputations_c[[1]][[i]]$ALLOW[split_source[[cou]]$sou=='ZA'])
+  
+  
+  co[[i]]=cor(ddd[[i]]$COMMONPOLICY, ddd[[i]]$ALLOW)
+}
+
+co_cou=pool_corr_fisher(co)
+colnames(co_cou) <- c("Midas","2.5%","97.5%")
+
+
+
+
+for( cou in unique(combined_data_or$Country_code)[-1]){
+
+  ddd=list()
+  co=list()
+  for(i in 1:10){
+    ddd[[i]]=data.frame("COMMONPOLICY"=combined_data_or$COMMONPOLICY[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"ALLOW"=imputations_c[[as.numeric(cou)]][[i]]$ALLOW[split_source[[cou]]$sou=='ZA'])
+      co[[i]]=cor(ddd[[i]]$COMMONPOLICY, ddd[[i]]$ALLOW)
+  }
+
+  pool_corr=pool_corr_fisher(co)
+  corr_allow=pool_corr
+  colnames(corr_allow) <- c("Midas","2.5%","97.5%")
+  co_cou=rbind(co_cou,corr_allow)
+}
+rownames(co_cou)=country
+write.csv(co_cou,file='policy_corr_allow_midas_country.csv',row.names = TRUE)
+```
+
+
+
+
+
+
+
+```{r}
+
+
+###############correlazione Overall
+
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("COMMONPOLICY"=combined_data_or$COMMONPOLICY[combined_data_or$source=="ZA"],"FEELING"=imputations[[i]]$FEELING[combined_data_or$source=="ZA"])
+  co[[i]]=cor(ddd[[i]]$COMMONPOLICY, ddd[[i]]$FEELING)
+}
+
+pool_corr_=pool_corr_fisher(co)
+corr_FEELING=pool_corr_
+colnames(corr_FEELING) <- c("Midas","2.5%","97.5%")
+write.csv(corr_FEELING,file='policy_corr_feeling_midas.csv',row.names = TRUE)
+
+#rm(corr_2lnorm,pool_corr)
+```
+
+```{r}
+### Correlazione per country
+cou=unique(combined_data_or$Country_code)[1]
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("COMMONPOLICY"=combined_data_or$COMMONPOLICY[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"FEELING"=imputations_c[[1]][[i]]$FEELING[split_source[[cou]]$sou=='ZA'])
+  
+  
+  co[[i]]=cor(ddd[[i]]$COMMONPOLICY, ddd[[i]]$FEELING)
+}
+
+co_cou_FEELING=pool_corr_fisher(co)
+colnames(co_cou_FEELING) <- c("Midas","2.5%","97.5%")
+
+
+
+
+for( cou in unique(combined_data_or$Country_code)[-1]){
+
+  ddd=list()
+  co=list()
+  for(i in 1:10){
+    ddd[[i]]=data.frame("COMMONPOLICY"=combined_data_or$COMMONPOLICY[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"FEELING"=imputations_c[[as.numeric(cou)]][[i]]$FEELING[split_source[[cou]]$sou=='ZA'])
+      co[[i]]=cor(ddd[[i]]$COMMONPOLICY, ddd[[i]]$FEELING)
+  }
+
+  pool_corr_=pool_corr_fisher(co)
+  corr_allow=pool_corr_
+  colnames(corr_allow) <- c("Midas","2.5%","97.5%")
+  co_cou_FEELING=rbind(co_cou_FEELING,corr_allow)
+}
+rownames(co_cou_FEELING)=country
+
+
+write.csv(co_cou_FEELING,file='policy_corr_feeling_midas_country.csv',row.names = TRUE)
+```
+
+
+
+
+
+
+#####ZA
+
+```{r}
+
+
+###############correlazione Overall
+
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("FEELING_ZA"=combined_data_or$FEELING_ZA[combined_data_or$source=="ZA"],"ALLOW"=imputations[[i]]$ALLOW[combined_data_or$source=="ZA"])
+  co[[i]]=cor(ddd[[i]]$FEELING_ZA, ddd[[i]]$ALLOW)
+}
+
+pool_corr=pool_corr_fisher(co)
+corr_allow=pool_corr
+colnames(corr_allow) <- c("Midas","2.5%","97.5%")
+write.csv(corr_allow,file='corr_allow_midas.csv',row.names = TRUE)
+
+#rm(corr_2lnorm,pool_corr)
+```
+
+```{r}
+### Correlazione per country
+cou=unique(combined_data_or$Country_code)[1]
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("FEELING_ZA"=combined_data_or$FEELING_ZA[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"ALLOW"=imputations_c[[1]][[i]]$ALLOW[split_source[[cou]]$sou=='ZA'])
+  
+  
+  co[[i]]=cor(ddd[[i]]$FEELING_ZA, ddd[[i]]$ALLOW)
+}
+
+co_cou=pool_corr_fisher(co)
+colnames(co_cou) <- c("Midas","2.5%","97.5%")
+
+
+
+
+for( cou in unique(combined_data_or$Country_code)[-1]){
+
+  ddd=list()
+  co=list()
+  for(i in 1:10){
+    ddd[[i]]=data.frame("FEELING_ZA"=combined_data_or$FEELING_ZA[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"ALLOW"=imputations_c[[as.numeric(cou)]][[i]]$ALLOW[split_source[[cou]]$sou=='ZA'])
+      co[[i]]=cor(ddd[[i]]$FEELING_ZA, ddd[[i]]$ALLOW)
+  }
+
+  pool_corr=pool_corr_fisher(co)
+  corr_allow=pool_corr
+  colnames(corr_allow) <- c("Midas","2.5%","97.5%")
+  co_cou=rbind(co_cou,corr_allow)
+}
+rownames(co_cou)=country
+write.csv(co_cou,file='corr_allow_midas_country.csv',row.names = TRUE)
+```
+
+
+
+
+
+
+
+```{r}
+
+
+###############correlazione Overall
+
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("FEELING_ZA"=combined_data_or$FEELING_ZA[combined_data_or$source=="ZA"],"FEELING"=imputations[[i]]$FEELING[combined_data_or$source=="ZA"])
+  co[[i]]=cor(ddd[[i]]$FEELING_ZA, ddd[[i]]$FEELING)
+}
+
+pool_corr_=pool_corr_fisher(co)
+corr_FEELING=pool_corr_
+colnames(corr_FEELING) <- c("Midas","2.5%","97.5%")
+write.csv(corr_FEELING,file='corr_feeling_midas.csv',row.names = TRUE)
+
+#rm(corr_2lnorm,pool_corr)
+```
+
+```{r}
+### Correlazione per country
+cou=unique(combined_data_or$Country_code)[1]
+ddd=list()
+co=list()
+for(i in 1:10){
+  ddd[[i]]=data.frame("FEELING_ZA"=combined_data_or$FEELING_ZA[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"FEELING"=imputations_c[[1]][[i]]$FEELING[split_source[[cou]]$sou=='ZA'])
+  
+  
+  co[[i]]=cor(ddd[[i]]$FEELING_ZA, ddd[[i]]$FEELING)
+}
+
+co_cou_FEELING=pool_corr_fisher(co)
+colnames(co_cou_FEELING) <- c("Midas","2.5%","97.5%")
+
+
+
+
+for( cou in unique(combined_data_or$Country_code)[-1]){
+
+  ddd=list()
+  co=list()
+  for(i in 1:10){
+    ddd[[i]]=data.frame("FEELING_ZA"=combined_data_or$FEELING_ZA[combined_data_or$source=="ZA" & combined_data_or$Country_code==cou],"FEELING"=imputations_c[[as.numeric(cou)]][[i]]$FEELING[split_source[[cou]]$sou=='ZA'])
+      co[[i]]=cor(ddd[[i]]$FEELING_ZA, ddd[[i]]$FEELING)
+  }
+
+  pool_corr_=pool_corr_fisher(co)
+  corr_allow=pool_corr_
+  colnames(corr_allow) <- c("Midas","2.5%","97.5%")
+  co_cou_FEELING=rbind(co_cou_FEELING,corr_allow)
+}
+rownames(co_cou_FEELING)=country
+
+
+write.csv(co_cou_FEELING,file='corr_feeling_midas_country.csv',row.names = TRUE)
+```
+
+
+
+
+```{r}
+### Regressione
+
+m=10
+imputation_EB=list()
+for(  i in 1:m){
+  
+  imputation_EB[[i]]=data.frame(imputations[[i]][combined_data_or$source!='ESS',]$ALLOW,imputations[[i]][combined_data_or$source!='ESS',]$FEELING)
+  imputation_EB[[i]]=data.frame("ALLOW"=imputation_EB[[i]][,1],"FEELING"=imputation_EB[[i]][,2],combined_data_or[combined_data_or$source!='ESS',colnames(combined_data_or) %in% c("Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                               "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,
+                               "Economy_Satisfaction" , "TRUST")])
+  #imputation_EB[[i]]=imputations[[i]]    ##    Nel caso in cui lo volessi su tutti    
+}
+
+form_all="ALLOW ~  Age + Gender +  Occupation + Domicile +   Subjective_income +
+                                          Political_Orientation + Attachment_country + Life_Satisfaction +
+                                          Economy_Satisfaction + TRUST"
+form_fe="FEELING ~  Age + Gender +  Occupation + Domicile +   Subjective_income +
+                                          Political_Orientation + Attachment_country + Life_Satisfaction +
+                                          Economy_Satisfaction + TRUST"
+par_un_all=rMIDAS::combine(form_all, df_list =imputation_EB) ### filtered for Eurobarometer
+par_un_fee=rMIDAS::combine(form_fe, df_list =imputation_EB) ### filtered for Eurobarometer
+
+
+write.csv(par_un_all,file="par_allow_midas.csv",row.names = TRUE)
+write.csv(par_un_fee,file="par_feeling_midas.csv",row.names = TRUE)
+
+```
+
+
+```{r}
+
+
+
+imputation_EB_country_list=list()
+par_imputation_EB_country_list_all=list()
+par_imputation_EB_country_list_fe=list()
+
+for(j in 1:16){
+  
+  imputation_EB_country=list()
+  for(  i in 1:m){
+    
+   # imputation_EB_country[[i]]=imputations[[i]][combined_data_or$source!='ESS' & combined_data_or$Country_code==j,]
+    
+    
+    imputation_EB_country[[i]]=data.frame(imputations_c[[j]][[i]]$ALLOW[split_source[[j]]$sou=='ZA'],imputations_c[[j]][[i]]$FEELING[split_source[[j]]$sou=='ZA'])
+    imputation_EB_country[[i]]=data.frame("ALLOW"=imputation_EB_country[[i]][,1],"FEELING"=imputation_EB_country[[i]][,2],combined_data_or[combined_data_or$source!='ESS' & combined_data_or$Country_code==j,colnames(combined_data_or) %in% c("Age" , "Gender" ,  "Occupation" , "Domicile" ,   "Subjective_income" ,
+                                                                                                                                      "Political_Orientation" , "Attachment_country" , "Life_Satisfaction" ,
+                                                                                                                                      "Economy_Satisfaction" , "TRUST")])
+    
+  }
+  imputation_EB_country_list[[j]]=imputation_EB_country
+  #par_un_all=rMIDAS::combine(form_all, df_list =imputation_EB) ### filtered for Eurobarometer
+  #par_un_fee=rMIDAS::combine(form_fe, df_list =imputation_EB) ### filtered for Eurobarometer
+  
+  par_imputation_EB_country_list_all[[j]]=rMIDAS::combine(form_all, imputation_EB_country_list[[j]])
+  par_imputation_EB_country_list_fe[[j]]=rMIDAS::combine(form_fe, imputation_EB_country_list[[j]])
+
+  write.csv(par_imputation_EB_country_list_all[[j]],file=paste(country[j],"par_allow_midas.csv",sep='_'),row.names = TRUE)
+  write.csv(par_imputation_EB_country_list_fe[[j]],file=paste(country[j],"par_feeling_midas.csv",sep='_'),row.names = TRUE)
+  
+}
+
+
+```
+

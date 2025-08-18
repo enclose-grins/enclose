@@ -1,0 +1,393 @@
+---
+title: "ENCLOSE: Latent trait estimation"
+output:
+  pdf_document: 
+  html_document: default
+    df_print: paged
+pre: <b>4. </b>
+draft: no
+weight: 40
+---
+
+```{r message=FALSE}
+library(lavaan)
+library(semTools)
+#library(psych)
+library(dplyr)
+```
+
+# Data loading
+```{r}
+load("h_ENCLOSE_data_panel.RData")
+rm(data9,data11)
+data9_h$source <- "data9"
+data11_h$source <- "data11"
+
+data <- rbind(data9_h, data11_h)
+```
+
+### TRUST_INSTITUTION
+```{r}
+model_trust_inst <- paste0(
+  "TRUST_INSTITUTION =~ ", paste(TRUST_INSTITUTION, collapse = " + ")
+)
+# Configural model syntax
+configural.syntax <- measEq.syntax(
+  configural.model = model_trust_inst,
+  data = data,
+  group = "Country",
+  parameterization = "theta",
+  ID.cat="Wu.Estabrook.2016",
+  ID.fac = "UV",
+  group.equal = NULL
+)
+
+model.syntax <- as.character(configural.syntax)
+fit_trust_inst <- lavaan::lavaan(
+  model = model.syntax,  
+  data = data,
+  group = "Country",
+  estimator = "WLSMV",
+  parameterization = "theta", 
+  optim.method = "BFGS",
+  control = list(iter.max = 1000, rel.tol = 1e-15)
+)
+
+
+# Predict scores
+# Predict latent scores by Country
+TI_scores <- lavPredict(fit_trust_inst)
+
+# Combine into a single data frame with country info
+TI_scores_df <- data.frame()
+
+for (country_code in names(TI_scores)) {
+  scores <- TI_scores[[country_code]]
+  
+  scores_df <- as.data.frame(scores)
+  scores_df$Country <- country_code
+  
+  TI_scores_df <- rbind(TI_scores_df, scores_df)
+}
+
+# Add row indices by country
+TI_scores_df <- TI_scores_df %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+data <- data %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+# Merge predicted scores into main dataset
+data <- left_join(data, TI_scores_df, by = c("Country", "row_in_group"))
+
+# Optional: drop row_in_group and rename the latent score
+if ("TRUST_INSTITUTION" %in% names(data)) {
+  data$TRUST_INSTITUTION <- data$TRUST_INSTITUTION
+} else {
+  # Adjust based on actual column name
+  latent_col <- grep("TRUST_INSTITUTION", names(data), value = TRUE)
+  data$TRUST_INSTITUTION <- data[[latent_col]]
+}
+
+# Clean up
+data$row_in_group <- NULL
+rm(TI_scores_df, TI_scores,latent_col)
+rm(model_trust_inst,model.syntax,configural.syntax)
+```
+
+## ##########################################
+## SATISFACTION
+```{r}
+SATISFACTION <- c(
+  "Economy_satisfaction",
+  "Government_satisfaction",
+  "Democracy_satisfaction",
+  "Education_satisfaction",
+  "Health_satisfaction"
+)
+model_satisfaction <- paste0(
+  "SATISFACTION =~ ", paste(SATISFACTION, collapse = " + ")
+)
+# Configural model syntax
+configural.syntax <- measEq.syntax(
+  configural.model = model_satisfaction,
+  data = data,
+  group = "Country",
+  parameterization = "theta",
+  ID.cat="Wu.Estabrook.2016",
+  ID.fac = "UV",
+  group.equal = NULL
+)
+
+model.syntax <- as.character(configural.syntax)
+fit_satisfaction <- lavaan::lavaan(
+  model = model.syntax,  
+  data = data,
+  group = "Country",
+  estimator = "WLSMV",
+  parameterization = "theta", 
+  optim.method = "BFGS",
+  control = list(iter.max = 1000, rel.tol = 1e-15)
+)
+
+
+# Predict scores
+# Predict latent scores
+satisfaction_scores <- lavPredict(fit_satisfaction)
+
+# Combine scores and add country info
+satisfaction_df <- data.frame()
+
+for (country in names(satisfaction_scores)) {
+  scores <- satisfaction_scores[[country]]
+  scores_df <- as.data.frame(scores)
+  scores_df$Country <- country
+  satisfaction_df <- rbind(satisfaction_df, scores_df)
+}
+
+# Add row index by country to merge safely
+satisfaction_df <- satisfaction_df %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+data <- data %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+# Merge scores back into main data
+data <- left_join(data, satisfaction_df, by = c("Country", "row_in_group"))
+
+# Extract and rename latent variable column
+latent_col <- grep("SATISFACTION", names(data), value = TRUE)
+data$SATISFACTION <- data[[latent_col]]
+
+# Clean up
+data$row_in_group <- NULL
+rm(satisfaction_scores, satisfaction_df, latent_col)
+
+rm(model_satisfaction,model.syntax,configural.syntax,country)
+```
+
+## ##########################################
+## TRUST PEOPLE
+```{r}
+model_trust_people <- paste0(
+  "TRUST_PEOPLE =~ ", paste(TRUST_PEOPLE, collapse = " + ")
+)
+# Configural model syntax
+configural.syntax <- measEq.syntax(
+  configural.model = model_trust_people,
+  data = data,
+  group = "Country",
+  parameterization = "theta",
+  ID.cat="Wu.Estabrook.2016",
+  ID.fac = "UV",
+  group.equal = NULL
+)
+
+model.syntax <- as.character(configural.syntax)
+fit_tp <- lavaan::lavaan(
+  model = model.syntax,  
+  data = data,
+  group = "Country",
+  estimator = "WLSMV",
+  parameterization = "theta", 
+  optim.method = "BFGS",
+  control = list(iter.max = 1000, rel.tol = 1e-15)
+)
+
+# Predict scores
+# Predict latent scores by Country
+TP_scores <- lavPredict(fit_tp)
+
+# Create a data frame with all scores and country info
+TP_scores_df <- data.frame()
+
+for (country_code in names(TP_scores)) {
+  scores <- TP_scores[[country_code]]
+  
+  # Convert to data frame and add country info
+  scores_df <- as.data.frame(scores)
+  scores_df$Country <- country_code
+  
+  TP_scores_df <- rbind(TP_scores_df, scores_df)
+}
+
+# Add row index by country to allow accurate merging
+TP_scores_df <- TP_scores_df %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+data <- data %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+# Merge predicted scores back into original dataset
+data <- left_join(data, TP_scores_df, by = c("Country", "row_in_group"))
+
+# Rename column
+data$TRUST_PEOPLE <- data$TRUST_PEOPLE
+data$row_in_group <- NULL
+
+# Clean up
+rm(TP_scores_df,TP_scores,model_trust_people,model.syntax,configural.syntax,country_code)
+```
+
+## ##########################################
+## POLITICAL PARTECIPATION
+```{r}
+POLITICAL_PARTECIPATION <- c(
+  "People_political_participation",
+  "Active_political",
+  "People_influence",
+  "Confident_participation"
+)
+model_polpart <- paste0(
+  "POLITICAL_PARTECIPATION =~ ", paste(POLITICAL_PARTECIPATION, collapse = " + ")
+)
+# Configural model syntax
+configural.syntax <- measEq.syntax(
+  configural.model = model_polpart,
+  data = data,
+  group = "Country",
+  parameterization = "theta",
+  ID.cat="Wu.Estabrook.2016",
+  ID.fac = "UV",
+  group.equal = NULL
+)
+
+model.syntax <- as.character(configural.syntax)
+fit_polpart <- lavaan::lavaan(
+  model = model.syntax,  
+  data = data,
+  group = "Country",
+  estimator = "WLSMV",
+  parameterization = "theta", 
+  optim.method = "BFGS",
+  control = list(iter.max = 1000, rel.tol = 1e-15)
+)
+
+# Predict scores
+# Predict latent scores by Country
+PP_scores <- lavPredict(fit_polpart)
+
+# Combine into a single data frame with country info
+PP_scores_df <- data.frame()
+
+for (country_code in names(PP_scores)) {
+  scores <- PP_scores[[country_code]]
+  
+  scores_df <- as.data.frame(scores)
+  scores_df$Country <- country_code
+  
+  PP_scores_df <- rbind(PP_scores_df, scores_df)
+}
+
+# Add row indices by country to both datasets
+PP_scores_df <- PP_scores_df %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+data <- data %>%
+  group_by(Country) %>%
+  mutate(row_in_group = row_number()) %>%
+  ungroup()
+
+# Merge predicted scores back into data
+data <- left_join(data, PP_scores_df, by = c("Country", "row_in_group"))
+
+# Rename latent score if necessary
+latent_col <- grep("POLITICAL_PARTECIPATION", names(data), value = TRUE)
+data$POLITICAL_PARTECIPATION <- data[[latent_col]]
+
+# Cleanup
+data$row_in_group <- NULL
+rm(PP_scores_df, PP_scores,latent_col)
+
+rm(model_polpart,model.syntax,configural.syntax,country_code)
+```
+
+## ##########################################
+## HVS
+```{r}
+HSV_CONSERVATION <- c(
+  "Conservation_1",
+  "Conservation_2",
+  "Conservation_3",
+  "Conservation_4",
+  "Conservation_5",
+  "Conservation_6"
+)
+
+HSV_OPENNESS <- c(
+  "Openness_to_change_1",
+  "Openness_to_change_2",
+  "Openness_to_change_3",
+  "Openness_to_change_4",
+  "Openness_to_change_5",
+  "Openness_to_change_6"
+)
+
+HSV_ENHANCEMENT <- c(
+  "Self_enhancement_1",
+  "Self_enhancement_2",
+  "Self_enhancement_3",
+  "Self_enhancement_4"
+)
+
+HSV_TRANSCENDENCE <- c(
+  "Self_transcendence_1",
+  "Self_transcendence_2",
+  "Self_transcendence_3",
+  "Self_transcendence_4",
+  "Self_transcendence_5"
+)
+
+# Build the lavaan model
+lavaan_HSV_model <- paste(
+  "HSV_CONSERVATION =~", paste(HSV_CONSERVATION, collapse = " + "), "\n",
+  "HSV_OPENNESS =~", paste(HSV_OPENNESS, collapse = " + "), "\n",
+  "HSV_ENHANCEMENT =~", paste(HSV_ENHANCEMENT, collapse = " + "), "\n",
+  "HSV_TRANSCENDENCE =~", paste(HSV_TRANSCENDENCE, collapse = " + "), "\n",
+  # latent trait covariances (all freely estimated)
+  "HSV_CONSERVATION ~~ HSV_OPENNESS + HSV_ENHANCEMENT + HSV_TRANSCENDENCE", "\n",
+  "HSV_OPENNESS ~~ HSV_ENHANCEMENT + HSV_TRANSCENDENCE", "\n",
+  "HSV_ENHANCEMENT ~~ HSV_TRANSCENDENCE"
+)
+
+# Show model syntax
+cat(lavaan_HSV_model)
+
+fit_HSV <- cfa(
+  lavaan_HSV_model,
+  data = data,
+  std.lv = TRUE,
+  estimator = "WLSMV",
+  optim.method = "BFGS",
+  control = list(iter.max = 1000, rel.tol = 1e-15)
+)
+
+
+HSV_scores <- lavPredict(fit_HSV)
+
+data$HSV_CONSERVATION <- HSV_scores[, 1]
+data$HSV_OPENNESS <- HSV_scores[, 2]
+data$HSV_ENHANCEMENT <- HSV_scores[, 3]
+data$HSV_TRANSCENDENCE <- HSV_scores[, 4]
+
+rm(HSV_scores,lavaan_HSV_model)
+
+```
+
+```{r}
+save.image("h_ENCLOSE_data_panel_latenttraits_configural.RData")
+```

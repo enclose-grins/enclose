@@ -1,0 +1,343 @@
+---
+title: "ENCLOSE Pseudo-panel : PMM imputation"
+output: html_document
+---
+
+```{r, warning=FALSE, message=FALSE}
+
+library(dplyr)
+
+library(writexl)
+library(ggplot2)
+
+library(tibble)
+library(tidyr)
+library(purrr)
+library(broom)
+library(mice)
+library(igraph)
+library(qgraph)
+```
+
+# Data loading
+```{r}
+load("h_ENCLOSE_data_panel_latenttraits_configural.RData")
+
+```
+
+```{r}
+vars_to_keep <- c(
+  "Country", "Age", "Gender", "Domicile", "Occupation",
+  "Marital_status", "Education",
+  "Interested_politics", "Political_position", 
+  "Discriminated_group", "Subjective_income",
+  "Religious", "Happy", "Life_satisfaction", "Voted",
+  "Attachment_country", "Attachment_EU",
+  "TRUST_PEOPLE",  "POLITICAL_PARTECIPATION",
+  "HSV_CONSERVATION", "HSV_OPENNESS", "HSV_ENHANCEMENT",
+  "HSV_TRANSCENDENCE", 
+  "source", 
+  "TRUST_INSTITUTION", "SATISFACTION"
+)
+
+# Keep only the selected variables
+data <- data[, vars_to_keep]
+data$country_code <- factor(data$Country, levels = sort(unique(data$Country)))
+
+data9=data[data$source=="data9",]
+data11=data[data$source=="data11",]
+data9 <- data9 %>%
+  rename(
+    TRUST_INSTITUTION9 = TRUST_INSTITUTION,
+    SATISFACTION9 = SATISFACTION
+  )
+
+data11 <- data11 %>%
+  rename(
+    TRUST_INSTITUTION11 = TRUST_INSTITUTION,
+    SATISFACTION11 = SATISFACTION
+  )
+```
+
+## COMBINED DATASET
+```{r}
+# Get common variables
+common_vars <- intersect(names(data9), names(data11))
+# Specify the variables you want to impute
+vars9 <- c("TRUST_INSTITUTION9","SATISFACTION9")
+vars11 <- c("TRUST_INSTITUTION11","SATISFACTION11")
+
+# Add missing columns to data11
+for (v in vars9) {
+  data11[[v]] <- NA
+}
+# Add missing columns to data9
+for (v in vars11) {
+  data9[[v]] <- NA
+}
+
+# Combine the full list
+all_vars <- union(common_vars, vars9)
+all_vars <- union(all_vars,vars11)
+# Subset the datasets
+data9 <- data9[, all_vars]
+data11  <- data11[, all_vars]
+
+  
+# Combine into one dataset
+combined_data <- rbind(data9, data11)
+combined_data$Country <- NULL
+combined_data$source  <- factor(combined_data$source, levels = c("data9","data11"))
+
+md.pattern(combined_data, rotate.names = TRUE)
+rm(vars9,vars11,all_vars,common_vars)
+```
+
+## pmm
+
+```{r, message=F}
+# After building 'data9' and 'data11' and adding 'country_code':
+combined_data <- rbind(data9, data11)
+combined_data$Country <- NULL
+combined_data$source  <- factor(combined_data$source, levels = c("data9","data11"))
+
+md.pattern(combined_data, rotate.names = TRUE)
+
+# Imputation loop
+countries <- unique(combined_data$country_code)
+imputed_data_list <- list()
+imp_list <- list()
+
+for (ctry in countries) {
+  message("Running mice for country: ", ctry)
+  country_data <- combined_data %>% filter(country_code == ctry)
+  
+  # Setup
+  imp_setup <- mice(country_data, maxit = 0)
+  meth      <- imp_setup$method
+  pred      <- imp_setup$predictorMatrix
+  
+  # Impute only 2018 variables by PMM
+  meth[] <- ""
+  meth[c("TRUST_INSTITUTION9","SATISFACTION9")] <- "pmm"
+  
+  # Exclude from predictors & imputation
+  pred[, c("TRUST_INSTITUTION11","SATISFACTION11","source","country_code")] <- 0
+  pred[c("Age","Gender","Domicile","Occupation","Marital_status","Education",
+         "Interested_politics","Political_position","Discriminated_group",
+         "Subjective_income","Religious","Happy","Life_satisfaction","Voted",
+         "Attachment_country","Attachment_EU","TRUST_PEOPLE",
+         "POLITICAL_PARTECIPATION","HSV_CONSERVATION","HSV_OPENNESS",
+         "HSV_ENHANCEMENT","HSV_TRANSCENDENCE"), ] <- 0
+  
+  # 'where' to restrict imputations to data11 rows only
+  n_total <- nrow(country_data)
+  n_d9    <- sum(country_data$source == "data9")
+  where   <- matrix(FALSE, nrow = n_total, ncol = ncol(country_data),
+                    dimnames = list(NULL, names(country_data)))
+  where[(n_d9+1):n_total, c("TRUST_INSTITUTION9","SATISFACTION9")] <- TRUE
+  
+  # Run mice
+  imp <- mice(country_data,
+              method          = meth,
+              predictorMatrix = pred,
+              where           = where,
+              m               = 20,
+              maxit           = 20,
+              seed            = 123,
+              print           = FALSE)
+  
+  # Extract all imputations in long format
+  completed <- complete(imp, action = "long", include = FALSE)
+  completed$country_code <- ctry
+  
+  imputed_data_list[[ctry]] <- completed
+  imp_list[[ctry]]         <- imp
+}
+
+combined_data_imputed <- bind_rows(imputed_data_list)
+```
+
+```{r,warning=F}
+save.image("ENCLOSE_pseudopanel_pmm.RData")
+```
+
+## PLOT
+## 1. Build Long-Format Data Frames
+```{r}
+# Imputed 2018 values (SATISFACTION9, TRUST_INSTITUTION9)
+imputed_long <- imap_dfr(imp_list, ~{
+  complete(.x, "long", include = FALSE) %>%
+    mutate(
+      country_code = .y,
+      source       = "imputed"
+    )
+})
+
+# Original 2018 values from data9
+original_long <- data9 %>%
+  select(country_code, SATISFACTION9, TRUST_INSTITUTION9) %>%
+  pivot_longer(
+    cols      = c(SATISFACTION9, TRUST_INSTITUTION9),
+    names_to  = "variable",
+    values_to = "value"
+  ) %>%
+  mutate(
+    source = "original",
+    .imp   = NA_integer_
+  )
+``` 
+
+# 2. Density Plots: Original vs All m  Imputations
+```{r plot-density-clean, message=FALSE, warning=FALSE}
+
+# A small helper to build & save one density plot
+plot_density <- function(var, out_file, data9, imputed_long, ncol = 6) {
+  # 1) Original data (data9)
+  orig_df <- data9 %>%
+    select(country_code, {{ var }} := !!sym(var)) %>%
+    rename(value = {{ var }}) %>%
+    mutate(source = "original", .imp = NA_integer_)
+  
+  # 2) Imputed data (all m imputations)
+  imp_df <- imputed_long %>%
+    select(country_code, .imp, source, !!sym(var)) %>%
+    rename(value = !!sym(var))
+  
+  # 3) Combine
+  df <- bind_rows(orig_df, imp_df)
+  
+  # 4) Open PNG device
+  png(out_file, width = 3000, height = 2000, res = 300)
+  
+  # 5) Build and print the plot
+  p <- ggplot(df, aes(x = value, color = source, group = interaction(source, .imp))) +
+    geom_density(size = 0.4, alpha = 0.7) +
+    facet_wrap(~ country_code, scales = "free", ncol = ncol) +
+    scale_color_manual(values = c(original = "red", imputed = "magenta")) +
+    labs(
+      x = "scores", 
+      y = "Density",
+      #title = str_c(var, ": original (blue) vs imputations (red)")
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+  print(p)
+  
+  # 6) Close device
+  dev.off()
+}
+
+# Make sure 'imputed_long' and 'data9' exist in your environment
+# Then call the helper twice:
+plot_density(
+  var             = "SATISFACTION9",
+  out_file        = "density_SATISFACTION_pmm.png",
+  data9           = data9,
+  imputed_long    = imputed_long,
+  ncol            = 6
+)
+plot_density(
+  var             = "TRUST_INSTITUTION9",
+  out_file        = "density_TRUST_pmm.png",
+  data9           = data9,
+  imputed_long    = imputed_long,
+  ncol            = 6
+)
+
+# Finally, include them in the report:
+knitr::include_graphics(c(
+  "density_SATISFACTION_pmm.png",
+  "density_TRUST_pmm.png"
+))
+
+```
+
+# 3. Comparison imputed 2018 vs original 2023
+
+```{r}
+plot_overlay <- function(var9, var11, out_file, ncol = 6, width = 12, height = 8, dpi = 300) {
+  imp_df <- imputed_long %>%
+    select(country_code, .imp, value = .data[[var9]]) %>%
+    mutate(source = "Imputed 2018")
+  
+  obs_df <- combined_data_imputed %>%
+    filter(source == "data11") %>%
+    select(country_code, value = .data[[var11]]) %>%
+    mutate(.imp = NA_integer_, source = "Observed 2023")
+  
+  df <- bind_rows(imp_df, obs_df)
+  
+  png(
+    filename = out_file,
+    width    = width  * dpi,
+    height   = height * dpi,
+    res      = dpi
+  )
+  p <- ggplot(df, aes(x = value, color = source, group = interaction(source, .imp))) +
+    geom_density(size = 0.5, alpha = 0.6) +
+    facet_wrap(~ country_code, scales = "free", ncol = ncol) +
+    scale_color_manual(
+      name   = "", 
+      values = c("Imputed 2018" = "magenta", "Observed 2023" = "blue")
+    ) +
+    labs(
+      x = var11, 
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      plot.title     = element_blank()
+    )
+  print(p)
+  dev.off()
+}
+
+# Example calls
+plot_overlay(
+  var9     = "SATISFACTION9",
+  var11    = "SATISFACTION11",
+  out_file = "density_SATISFACTION_1823_pmm.png"
+)
+plot_overlay(
+  var9     = "TRUST_INSTITUTION9",
+  var11    = "TRUST_INSTITUTION11",
+  out_file = "density_TRUST_1823_pmm.png"
+)
+# Include in report
+knitr::include_graphics(
+  c("density_SATISFACTION_1823_pmm.png",
+    "density_TRUST_1823_pmm.png")
+)
+```
+
+# 5. Significance of Mean Change (Rubin’s Rules)
+
+```{r}
+sig_cat <- function(p) {
+  case_when(
+    p < 0.01       ~ "p<.01",
+    p < 0.05       ~ "p<.05",
+    p < 0.10       ~ "p<.10",
+    TRUE           ~ "ns"
+  )
+}
+
+results_sig <- imap_dfr(imp_list, ~{
+  sat <- pool(with(.x, lm(SATISFACTION11 - SATISFACTION9 ~ 1)))
+  tr  <- pool(with(.x, lm(TRUST_INSTITUTION11   - TRUST_INSTITUTION9 ~ 1)))
+  ss  <- summary(sat)[1, ]
+  st  <- summary(tr)[1, ]
+  tibble(
+    country       = .y,
+    mean_sat_diff = ss$estimate, p_sat = ss$p.value, sig_sat = sig_cat(ss$p.value),
+    mean_trust_diff = st$estimate, p_trust = st$p.value, sig_trust = sig_cat(st$p.value)
+  )
+})
+
+write_xlsx(results_sig, "pmm_change_significance_by_country.xlsx")
+knitr::kable(results_sig, caption = "Significance of mean change by country")
+
+```
+

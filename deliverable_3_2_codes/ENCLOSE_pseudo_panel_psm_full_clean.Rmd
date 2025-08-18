@@ -1,0 +1,169 @@
+---
+title: "Enclose: Pseudo-panel creation -propensity score matching: FULL"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+set.seed(123)
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE, fig.width=7, fig.height=5)
+library(dplyr)
+library(MatchIt)
+library(writexl)
+library(knitr)
+library(marginaleffects)
+```
+
+## 1. Load and Prepare Data
+
+```{r data-loading}
+# Load your data panel
+load("h_ENCLOSE_data_panel_latenttraits_configural.RData")
+rm(list = setdiff(ls(), c("data", "countries")))
+
+# Keep only needed variables
+vars_to_keep <- c(
+  "Country","Age","Gender","Domicile","Occupation",
+  "Marital_status","Education","Interested_politics",
+  "Political_position","Discriminated_group","Subjective_income",
+  "Religious","Happy","Life_satisfaction","Voted",
+  "Attachment_country","Attachment_EU",
+  "TRUST_PEOPLE","POLITICAL_PARTECIPATION",
+  "HSV_CONSERVATION","HSV_OPENNESS","HSV_ENHANCEMENT",
+  "HSV_TRANSCENDENCE","source","TRUST_INSTITUTION","SATISFACTION"
+)
+data <- data[, vars_to_keep]
+data$country_code <- factor(data$Country, levels = sort(unique(data$Country)))
+
+# Split donors and recipients
+
+# Subset your two waves
+d9  <- data %>% filter(source == "data9")
+d11 <- data %>% filter(source == "data11")
+
+# Add indicator: treated = data11 (1), control = data9 (0)
+d9  <- mutate(d9, treated = 0)
+d11 <- mutate(d11, treated = 1)
+
+# Keep IDs for later
+d9  <- mutate(d9, id9  = row_number())
+d11 <- mutate(d11, id11 = row_number())
+
+# Combine
+ps_data <- bind_rows(d9, d11)
+rm(d9, d11, data, vars_to_keep)
+
+```
+
+## 2. Define Matching Variables and IDs
+
+```{r define-matching-vars}
+# Covariates to use for PS model
+covs <- c(
+  "Age", "Gender", "Domicile", "Occupation", "Marital_status", "Education",
+  "Interested_politics", "Political_position", "Discriminated_group", 
+  "Subjective_income", "Religious", "Happy", "Life_satisfaction", "Voted",
+  "Attachment_country", "Attachment_EU", "TRUST_PEOPLE", "POLITICAL_PARTECIPATION",
+  "HSV_CONSERVATION", "HSV_OPENNESS", "HSV_ENHANCEMENT", "HSV_TRANSCENDENCE"
+)
+
+```
+
+## 3. Optimal matching by Country
+```{r optimal-matching}
+match_results   <- list()
+balance_before  <- list()
+balance_after   <- list()
+cov_names       <- NULL
+shift_results   <- data.frame()
+
+for (ctry in unique(ps_data$country_code)) {
+  message("PSM for country: ", ctry)
+  df <- filter(ps_data, country_code == ctry)
+  
+  if (length(unique(df$treated)) < 2) next
+  
+  formula_ps <- as.formula(paste("treated ~", paste(covs, collapse = " + ")))
+  
+  m.out <- matchit(
+    formula_ps,
+    data     = df,
+    method   = "full",
+    distance = "glm",
+    link     = "logit",
+    estimand = "ATT"
+  )
+  
+  match_results[[ctry]] <- m.out
+  
+  # Balance statistics
+  ss <- summary(m.out, standardize = TRUE)
+  if (is.null(cov_names)) cov_names <- rownames(ss$sum.all)
+  balance_before[[ctry]] <- ss$sum.all[, "Std. Mean Diff."]
+  balance_after[[ctry]]  <- ss$sum.matched[, "Std. Mean Diff."]
+  
+  md <- match.data(m.out)
+  
+  # TRUST
+  f_trust <- as.formula(paste("TRUST_INSTITUTION ~ treated * (", paste(covs, collapse = " + "), ")"))
+  mod_trust <- lm(f_trust, data = md, weights = md$weights)
+  cmp_trust <- avg_comparisons(
+    mod_trust,
+    variables = "treated",
+    newdata   = md[md$treated == 1, ],
+    vcov      = ~subclass
+  )
+  
+  # SATISFACTION
+  f_sat <- as.formula(paste("SATISFACTION ~ treated * (", paste(covs, collapse = " + "), ")"))
+  mod_sat <- lm(f_sat, data = md, weights = md$weights)
+  cmp_sat <- avg_comparisons(
+    mod_sat,
+    variables = "treated",
+    newdata   = md[md$treated == 1, ],
+    vcov      = ~subclass
+  )
+  
+  # Store only estimate and p-value
+  shift_results <- bind_rows(
+    shift_results,
+    data.frame(
+      country  = ctry,
+      outcome  = "TRUST_INSTITUTION",
+      estimate = cmp_trust$estimate,
+      pvalue   = cmp_trust$p.value
+    ),
+    data.frame(
+      country  = ctry,
+      outcome  = "SATISFACTION",
+      estimate = cmp_sat$estimate,
+      pvalue   = cmp_sat$p.value
+    )
+  )
+}
+
+# Combine balance stats
+balance_before_df <- as.data.frame(do.call(cbind, balance_before))
+balance_after_df  <- as.data.frame(do.call(cbind, balance_after))
+rownames(balance_before_df) <- cov_names
+rownames(balance_after_df)  <- cov_names
+balance_before_df <- tibble::rownames_to_column(balance_before_df, var = "Covariate")
+balance_after_df  <- tibble::rownames_to_column(balance_after_df,  var = "Covariate")
+
+# Save to Excel
+write_xlsx(
+  list(
+    Balance_Before = balance_before_df,
+    Balance_After  = balance_after_df,
+    Shift          = shift_results
+  ),
+  "full_results.xlsx"
+)
+
+```
+
+
+## 4. Save Results
+
+```{r,warning=F}
+save.image("ENCLOSE_pseudopanel_psm_full.RData")
+```

@@ -1,0 +1,173 @@
+---
+title: "MIDAS_imputation"
+output: html_document
+date: "2025-08-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## load data
+
+```{r cars}
+
+####################### rMIDAS: follow the configuration for rMIDAS and the conda env set up 
+
+library(rMIDAS)
+use_condaenv("rmidas", conda = "conda.exe", required = TRUE)
+load("h_ENCLOSE_data_multilevelMIRT.RData")
+combined_data_or=combined_data
+country=rownames( table(combined_data$Country,combined_data$Country_code))
+library(dplyr)
+items <- combined_data %>%
+  select(Country,
+         Trust_Parliament,Trust_Legalsystem,
+         Trust_police,Trust_politicalparties,
+         Trust_EU,Trust_UN,
+         Allow_samerace,Allow_differentrace,
+         Allow_poorcountries,Impact_economy,
+         Impact_cultural,Impact_country,
+         Common_policy,Asylum_system,
+         External_border,Imm_EU,Imm_NonEU,Im_contr,
+         help_refugees)
+
+combined_data <- combined_data[ , !(names(combined_data) %in% colnames(items))]
+combined_data$Country_code<- as.integer(combined_data$Country_code)
+combined_data<-combined_data
+
+
+
+# DATA SET CREATION
+
+
+combined_data$Country_code<- as.integer(combined_data$Country_code)
+
+colnames(combined_data)
+sour=combined_data$source
+combined_data=combined_data[,-c(11,12,17)] ### remove source, weights e FEELING ZA
+colnames(combined_data)
+
+```
+
+## Imputation
+
+Imputes for all an for each coutry separately
+
+```{r pressure, echo=FALSE}
+
+##Use of contrasts for ordinals
+
+contrasts(combined_data$Political_Orientation)=contr.poly(3)
+combined_data$Political_Orientation_L=combined_data$Political_Orientation
+levels(combined_data$Political_Orientation_L)=contrasts(combined_data$Political_Orientation)[,1]
+combined_data$Political_Orientation_Q=combined_data$Political_Orientation
+levels(combined_data$Political_Orientation_Q)=contrasts(combined_data$Political_Orientation)[,2]
+
+contrasts(combined_data$Attachment_country)=contr.poly(4)
+combined_data$Attachment_country_L=combined_data$Attachment_country
+levels(combined_data$Attachment_country_L)=contrasts(combined_data$Attachment_country)[,1]
+combined_data$Attachment_country_Q=combined_data$Attachment_country
+levels(combined_data$Attachment_country_Q)=contrasts(combined_data$Attachment_country)[,2]
+combined_data$Attachment_country_C=combined_data$Attachment_country
+levels(combined_data$Attachment_country_C)=contrasts(combined_data$Attachment_country)[,3]
+
+contrasts(combined_data$Life_Satisfaction)=contr.poly(4)
+combined_data$Life_Satisfaction_L=combined_data$Life_Satisfaction
+levels(combined_data$Life_Satisfaction_L)=contrasts(combined_data$Life_Satisfaction)[,1]
+combined_data$Life_Satisfaction_Q=combined_data$Life_Satisfaction
+levels(combined_data$Life_Satisfaction_Q)=contrasts(combined_data$Life_Satisfaction)[,2]
+combined_data$Life_Satisfaction_C=combined_data$Life_Satisfaction
+levels(combined_data$Life_Satisfaction_C)=contrasts(combined_data$Life_Satisfaction)[,3]
+
+contrasts(combined_data$Economy_Satisfaction)=contr.poly(4)
+combined_data$Economy_Satisfaction_L=combined_data$Economy_Satisfaction
+levels(combined_data$Economy_Satisfaction_L)=contrasts(combined_data$Economy_Satisfaction)[,1]
+combined_data$Economy_Satisfaction_Q=combined_data$Economy_Satisfaction
+levels(combined_data$Economy_Satisfaction_Q)=contrasts(combined_data$Economy_Satisfaction)[,2]
+combined_data$Economy_Satisfaction_C=combined_data$Economy_Satisfaction
+levels(combined_data$Economy_Satisfaction_C)=contrasts(combined_data$Economy_Satisfaction)[,3]
+
+
+combined_data$Subjective_income=as.factor(combined_data$Subjective_income)
+contrasts(combined_data$Subjective_income)=contr.poly(2)
+combined_data$Subjective_income_L=combined_data$Subjective_income
+levels(combined_data$Subjective_income_L)=contrasts(combined_data$Subjective_income)[,1]
+
+
+ordina=c("Political_Orientation", "Attachment_country","Economy_Satisfaction"  , "Life_Satisfaction","Subjective_income","COMMONPOLICY" )
+combined_data=combined_data[,!colnames(combined_data) %in% ordina]
+
+
+vals <- apply(combined_data, 2, function(x) length(unique(x)[!is.na(unique(x))]))
+
+cont_vars <- c("Age", "TRUST", "ALLOW","FEELING",colnames(combined_data)[9:20]) #,"Common_policy","FEELING_ZA",)
+cat_vars <- names(vals)[vals > 2 & !(names(vals) %in% cont_vars)]
+bin_vars <- names(vals)[vals == 2][1] #"Gender"                  "Subjective_income" 
+
+for(bin_var in bin_vars){
+  
+  combined_data[,bin_var]=  as.numeric(combined_data[,bin_var])
+  
+}
+
+for(con_var in cont_vars){
+  
+  combined_data[,con_var]=  as.numeric(combined_data[,con_var])
+  
+}
+
+
+#combined_data_res=combined_data[sample(1:nrow(combined_data),400,replace = FALSE),]
+
+data_conv <- convert(combined_data, bin_cols = bin_vars, cat_cols = cat_vars,
+                     
+                     minmax_scale = TRUE)
+
+
+
+data_train <- train(data_conv, layer_structure = c(256, 256),
+                    
+                    vae_layer = FALSE, seed = 89, input_drop = 0.75,
+                    
+                    training_epochs = 10)
+
+
+
+n_rep=10
+
+
+imputations <- rMIDAS::complete(data_train, m = n_rep)
+
+
+
+split_datasets <- split(combined_data, combined_data$Country_code)
+sour_sp=data.frame("country"=combined_data$Country_code,"sou"=sour)
+split_source<-split(sour_sp,sour_sp$country)
+imputations_c=list()
+for (k in 1:16){
+  
+  ddt=split_datasets[[k]][,-1] ##remove country
+  
+  
+  data_conv1 <- convert(ddt, bin_cols = bin_vars, cat_cols = cat_vars[-1],
+                        
+                        minmax_scale = TRUE)
+  
+  
+  data_train1 <- train(data_conv1, layer_structure = c(256, 256),
+                       
+                       vae_layer = FALSE, seed = 89, input_drop = 0.75,
+                       
+                       training_epochs = 10)
+  
+  n_rep=10
+  
+  imputations_c[[k]] <- rMIDAS::complete(data_train1, m = n_rep)
+  
+}
+save.image("Rmidas_ENV.RData")
+```
+
+
+

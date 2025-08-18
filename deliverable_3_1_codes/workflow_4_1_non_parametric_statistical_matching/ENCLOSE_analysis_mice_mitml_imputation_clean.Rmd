@@ -1,0 +1,934 @@
+---
+title: "MICE imputation: result analysis"
+author: "ENCLOSE project" 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+
+# load packages
+```{r  message=FALSE, warning=FALSE}
+library(mice)
+library(mitml)
+library(miceadds) 
+library(lme4)
+library(multilevelTools)
+library(lattice)
+library(dplyr)
+library(writexl)
+library(openxlsx)
+library(ggplot2)
+library(tidyr)
+```
+
+
+# DATA LOADINGS
+```{r}
+load("ENCLOSE_mice_mitml_imputation.RData")
+country_labels <- c("BE", "BG", "CZ", "EE", "FI", "FR", "GR", "HR",
+                    "HU", "IE", "IT", "LT", "NL", "PT", "SI", "SK")
+```
+
+## Pooled correlation
+```{r pooledcorr}
+#' Pool correlations from multiply imputed data using Fisher's Z transformation
+#'
+#' @param corr_list A list of correlations (typically from with() on a mids object)
+#' @param m The number of imputations (optional, inferred from length if NULL)
+#'
+#' @return A named numeric vector: pooled correlation and 95% CI
+pool_corr_fisher <- function(corr_list, m = NULL) {
+  z_values <- atanh(unlist(corr_list))  # Fisher's Z-transform
+  
+  if (is.null(m)) m <- length(z_values)
+  
+  z_bar <- mean(z_values)               # Mean of transformed correlations
+  within_var <- var(z_values)           # Within-imputation variance
+  between_var <- 0                      # Between-var is 0 since cor is deterministic
+  
+  total_var <- within_var * (1 + 1 / m) # Rubin's rules
+  
+  pooled_r <- tanh(z_bar)               # Back-transform
+  se <- sqrt(total_var)
+  ci_lower <- tanh(z_bar - 1.96 * se)
+  ci_upper <- tanh(z_bar + 1.96 * se)
+  
+  return(cbind(pooled_r = pooled_r, ci_lower = ci_lower, ci_upper = ci_upper))
+}
+```
+
+## #########################################################
+## MICE -single level (norm)
+```{r, message=F}
+completed_data_norm$Country_code <- factor(completed_data_norm$Country_code,                                             levels = 1:16, labels = country_labels)
+```
+
+### density plots
+```{r, fig.width=10, fig.height=10, dpi=300}
+png("FCSsl_densityplot_AF.png", width = 2000, height = 1000, res = 300)
+
+densityplot(imp_norm, 
+            ~ALLOW + FEELING,  # The variables to plot
+            strip = strip.custom(factor.levels = c("Immigration rejection", "Perceived benefits of immigration")),  # Panel titles
+            scales = list(relation = "same"))
+
+dev.off()
+knitr::include_graphics("FCSsl_densityplot_AF.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("FCSsl_densityplot_Allow_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_norm$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_norm$data$Country_code)){
+  
+  plot(density(na.omit(imp_norm$data$ALLOW[imp_norm$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_norm$data$Country_code==cou &imp_norm$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_norm$imp$ALLOW[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("FCSsl_densityplot_Allow_country.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("FCSsl_densityplot_Feeling_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_norm$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_norm$data$Country_code)){
+  
+  plot(density(na.omit(imp_norm$data$FEELING                       [imp_norm$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_norm$data$Country_code==cou &imp_norm$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_norm$imp$FEELING[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("FCSsl_densityplot_Feeling_country.png")
+```
+
+### Regressions
+```{r, message=FALSE}
+fit_allow_FCSsl <- with(imp_norm, lmer(ALLOW ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country +   Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_allow_FCSsl))
+ss=test$estimates
+estimates_allow=cbind(ss[,1],ss[,5])
+colnames(estimates_allow)[(ncol(estimates_allow)-1):ncol(estimates_allow)] <- c("FCSsl", "p-value")
+rm(test,ss)
+```
+
+```{r, message=FALSE}
+fit_feeling_FCSsl <- with(imp_norm, lmer(FEELING ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country +   Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_feeling_FCSsl))
+ss=test$estimates
+estimates_feeling=cbind(ss[,1],ss[,5])
+colnames(estimates_feeling)[(ncol(estimates_feeling)-1):ncol(estimates_feeling)] <- c("FCSsl", " p-value")
+rm(test,ss)
+```
+
+
+  
+```{r,warning=F}
+fit_commonpol_FCSsl <- with(imp_norm, lmer(COMMONPOLICY ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country +   Life_Satisfaction + Economy_Satisfaction +TRUST+ ALLOW+FEELING+ 
+  (1 | Country_code), subset = source == "ZA"))
+test=testEstimates(as.mitml.result(fit_commonpol_FCSsl))
+ss=test$estimates
+estimates_policy=cbind(ss[,1],ss[,5])
+colnames(estimates_policy)[(ncol(estimates_policy)-1):ncol(estimates_policy)]<- c("FCSsl", "p-value")
+rm(test,ss)
+```
+
+
+
+### Correlation results
+
+```{r,warning=F}
+corr_FCSsl <- with(imp_norm, cor(FEELING_ZA[source == "ZA"], 
+              ALLOW[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSsl)
+corr_allow=cbind(pool_corr)
+colnames(corr_allow)[(ncol(corr_allow)-2):ncol(corr_allow)] <- 
+  c("FCSsl Estimates","2.5%","97.5%")
+rm(corr_FCSsl,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_FCSsl <- with(imp_norm, cor(FEELING_ZA[source == "ZA" & Country_code==j], ALLOW[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSsl)
+corrn[j,]<-pool_corr
+rm(corr_FCSsl,pool_corr)
+
+}
+corrj_allow=cbind(corrn)
+colnames(corrj_allow) [(ncol(corrj_allow)-2):ncol(corrj_allow)] <- 
+  c("FCSsl Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+```{r,warning=F}
+corr_FCSsl <- with(imp_norm, cor(FEELING_ZA[source == "ZA"], 
+              FEELING[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSsl)
+corr_feel=cbind(pool_corr)
+colnames(corr_feel)[(ncol(corr_feel)-2):ncol(corr_feel)] <- 
+  c("FCSsl Estimates","2.5%","97.5%")
+rm(corr_FCSsl,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_FCSsl <- with(imp_norm, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    FEELING[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSsl)
+corrn[j,]<-pool_corr
+rm(corr_FCSsl,pool_corr)
+
+}
+corrj_feel=cbind(corrn)
+colnames(corrj_feel) [(ncol(corrj_feel)-2):ncol(corrj_feel)] <- 
+  c("FCSsl Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+## PAN MICE - random intercepts.
+```{r, message=F}
+completed_data_FCSri$Country_code <- factor(completed_data_FCSri$Country_code,                                             levels = 1:16, labels = country_labels)
+```
+
+### density plots
+```{r, fig.width=10, fig.height=10, dpi=300}
+png("FCSri_densityplot_AF.png", width = 2000, height = 1000, res = 300)
+
+densityplot(imp_FCSri, 
+            ~ALLOW + FEELING,  # The variables to plot
+            strip = strip.custom(factor.levels = c("Immigration rejection", "Perceived benefits of immigration")),  # Panel titles
+            scales = list(relation = "same"))
+
+dev.off()
+knitr::include_graphics("FCSri_densityplot_AF.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("FCSri_densityplot_Allow_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_FCSri$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_FCSri$data$Country_code)){
+  
+  plot(density(na.omit(imp_FCSri$data$ALLOW                       [imp_FCSri$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_FCSri$data$Country_code==cou &imp_FCSri$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_FCSri$imp$ALLOW[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("FCSri_densityplot_Allow_country.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("FCSri_densityplot_Feeling_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_FCSri$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_FCSri$data$Country_code)){
+  
+  plot(density(na.omit(imp_FCSri$data$FEELING                       [imp_FCSri$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_FCSri$data$Country_code==cou &imp_FCSri$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_FCSri$imp$FEELING[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("FCSri_densityplot_Feeling_country.png")
+```
+
+### Regressions
+```{r, message=FALSE}
+fit_allow_FCSri <- with(imp_FCSri, lmer(ALLOW ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_allow_FCSri))
+ss=test$estimates
+estimates_allow=cbind(estimates_allow,ss[,1],ss[,5])
+colnames(estimates_allow)[(ncol(estimates_allow)-1):ncol(estimates_allow)] <- c("FCSri", "p-value")
+rm(test,ss)
+```
+
+```{r, message=FALSE}
+fit_feeling_FCSri <- with(imp_FCSri, lmer(FEELING ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_feeling_FCSri))
+ss=test$estimates
+estimates_feeling=cbind(estimates_feeling,ss[,1],ss[,5])
+colnames(estimates_feeling)[(ncol(estimates_feeling)-1):ncol(estimates_feeling)] <- c("FCSri", " p-value")
+rm(test,ss)
+```
+
+```{r,warning=F}
+fit_commonpol_FCSri <- with(imp_FCSri, lmer(COMMONPOLICY ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country +   Life_Satisfaction + Economy_Satisfaction +ALLOW+FEELING+ 
+  (1 | Country_code), subset = source == "ZA"))
+test=testEstimates(as.mitml.result(fit_commonpol_FCSri))
+ss=test$estimates
+estimates_policy=cbind(estimates_policy,ss[,1],ss[,5])
+colnames(estimates_policy)[(ncol(estimates_policy)-1):ncol(estimates_policy)]<- c("FCSri", "p-value")
+rm(test,ss)
+```
+
+### Correlation results
+
+```{r,warning=F}
+corr_FCSri <- with(imp_FCSri, cor(FEELING_ZA[source == "ZA"], 
+              ALLOW[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSri)
+corr_allow=cbind(corr_allow,pool_corr)
+colnames(corr_allow)[(ncol(corr_allow)-2):ncol(corr_allow)] <- 
+  c("FCSri Estimates","2.5%","97.5%")
+rm(corr_FCSri,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_FCSri <- with(imp_FCSri, cor(FEELING_ZA[source == "ZA" & Country_code==j], ALLOW[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSri)
+corrn[j,]<-pool_corr
+rm(corr_FCSri,pool_corr)
+
+}
+corrj_allow=cbind(corrj_allow,corrn)
+colnames(corrj_allow) [(ncol(corrj_allow)-2):ncol(corrj_allow)] <- 
+  c("FCSri Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+```{r,warning=F}
+corr_FCSri <- with(imp_FCSri, cor(FEELING_ZA[source == "ZA"], 
+              FEELING[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSri)
+corr_feel=cbind(corr_feel,pool_corr)
+colnames(corr_feel)[(ncol(corr_feel)-2):ncol(corr_feel)] <- 
+  c("FCSri Estimates","2.5%","97.5%")
+rm(corr_FCSri,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_FCSri <- with(imp_FCSri, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    FEELING[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSri)
+corrn[j,]<-pool_corr
+rm(corr_FCSri,pool_corr)
+
+}
+corrj_feel=cbind(corrj_feel,corrn)
+colnames(corrj_feel) [(ncol(corrj_feel)-2):ncol(corrj_feel)] <- 
+  c("FCSri Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+## random intercept and random slopes.
+```{r, message=F}
+completed_data_imp_FCSrs$Country_code <- factor(completed_data_imp_FCSrs$Country_code,                                             levels = 1:16, labels = country_labels)
+```
+
+### density plots
+```{r, fig.width=10, fig.height=10, dpi=300}
+png("FCSrs_densityplot_AF.png", width = 2000, height = 1000, res = 300)
+
+densityplot(imp_FCSrs, 
+            ~ALLOW + FEELING,  # The variables to plot
+            strip = strip.custom(factor.levels = c("Immigration rejection", "Perceived benefits of immigration")),  # Panel titles
+            scales = list(relation = "same"))
+
+dev.off()
+knitr::include_graphics("FCSrs_densityplot_AF.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("FCSrs_densityplot_Allow_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_FCSrs$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_FCSrs$data$Country_code)){
+  
+  plot(density(na.omit(imp_FCSrs$data$ALLOW                       [imp_FCSrs$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_FCSrs$data$Country_code==cou &imp_FCSrs$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_FCSrs$imp$ALLOW[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("FCSrs_densityplot_Allow_country.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("FCSrs_densityplot_Feeling_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_FCSrs$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_FCSrs$data$Country_code)){
+  
+  plot(density(na.omit(imp_FCSrs$data$FEELING                       [imp_FCSrs$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_FCSrs$data$Country_code==cou &imp_FCSrs$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_FCSrs$imp$FEELING[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("FCSrs_densityplot_Feeling_country.png")
+```
+
+### Regressions
+```{r, message=FALSE}
+fit_allow_FCSrs <- with(imp_FCSrs, lmer(ALLOW ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_allow_FCSrs))
+ss=test$estimates
+estimates_allow=cbind(estimates_allow,ss[,1],ss[,5])
+colnames(estimates_allow)[(ncol(estimates_allow)-1):ncol(estimates_allow)] <- c("FCSrs", "p-value")
+rm(test,ss)
+```
+
+```{r, message=FALSE}
+fit_feeling_FCSrs <- with(imp_FCSrs, lmer(FEELING ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_feeling_FCSrs))
+ss=test$estimates
+estimates_feeling=cbind(estimates_feeling,ss[,1],ss[,5])
+colnames(estimates_feeling)[(ncol(estimates_feeling)-1):ncol(estimates_feeling)] <- c("FCSrs", " p-value")
+rm(test,ss)
+```
+
+```{r,warning=F}
+fit_commonpol_FCSrs <- with(imp_FCSrs, lmer(COMMONPOLICY ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + ALLOW+FEELING+ 
+  (1 | Country_code), subset = source == "ZA"))
+test=testEstimates(as.mitml.result(fit_commonpol_FCSrs))
+ss=test$estimates
+estimates_policy=cbind(estimates_policy,ss[,1],ss[,5])
+colnames(estimates_policy)[(ncol(estimates_policy)-1):ncol(estimates_policy)]<- c("FCSrs", "p-value")
+rm(test,ss)
+```
+
+### Correlation results
+
+```{r,warning=F}
+corr_FCSrs <- with(imp_FCSrs, cor(FEELING_ZA[source == "ZA"], 
+              ALLOW[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSrs)
+corr_allow=cbind(corr_allow,pool_corr)
+colnames(corr_allow)[(ncol(corr_allow)-2):ncol(corr_allow)] <- 
+  c("FCSrs Estimates","2.5%","97.5%")
+rm(corr_FCSrs,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_FCSrs <- with(imp_FCSrs, cor(FEELING_ZA[source == "ZA" & Country_code==j], ALLOW[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSrs)
+corrn[j,]<-pool_corr
+rm(corr_FCSrs,pool_corr)
+
+}
+corrj_allow=cbind(corrj_allow,corrn)
+colnames(corrj_allow) [(ncol(corrj_allow)-2):ncol(corrj_allow)] <- 
+  c("FCSrs Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+```{r,warning=F}
+corr_FCSrs <- with(imp_FCSrs, cor(FEELING_ZA[source == "ZA"], 
+              FEELING[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSrs)
+corr_feel=cbind(corr_feel,pool_corr)
+colnames(corr_feel)[(ncol(corr_feel)-2):ncol(corr_feel)] <- 
+  c("FCSrs Estimates","2.5%","97.5%")
+rm(corr_FCSrs,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_FCSrs <- with(imp_FCSrs, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    FEELING[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_FCSrs)
+corrn[j,]<-pool_corr
+rm(corr_FCSrs,pool_corr)
+
+}
+corrj_feel=cbind(corrj_feel,corrn)
+colnames(corrj_feel) [(ncol(corrj_feel)-2):ncol(corrj_feel)] <- 
+  c("FCSrs Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+
+
+##########################################################################
+#JM MITML
+## random intercept
+```{r, message=F}
+completed_data_JMsep$Country_code <- factor(completed_data_JMsep$Country_code,                                             levels = 1:16, labels = country_labels)
+```
+
+### density plots
+```{r, fig.width=10, fig.height=10, dpi=300}
+png("JMsep_densityplot_AF.png", width = 2000, height = 1000, res = 300)
+
+densityplot(imp_mids_JMsep, 
+            ~ALLOW + FEELING,  # The variables to plot
+            strip = strip.custom(factor.levels = c("Immigration rejection", "Perceived benefits of immigration")),  # Panel titles
+            scales = list(relation = "same"))
+
+dev.off()
+knitr::include_graphics("JMsep_densityplot_AF.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("JMsep_densityplot_Allow_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_mids_JMsep$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_mids_JMsep$data$Country_code)){
+  
+  plot(density(na.omit(imp_mids_JMsep$data$ALLOW                       [imp_mids_JMsep$data$Country_code==cou])),main=country_labels[cou],
+       xlab='')
+  coun_row=which(imp_mids_JMsep$data$Country_code==cou &imp_mids_JMsep$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_mids_JMsep$imp$ALLOW[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("JMsep_densityplot_Allow_country.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("JMsep_densityplot_Feeling_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_mids_JMsep$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_mids_JMsep$data$Country_code)){
+  
+  plot(density(na.omit(imp_mids_JMsep$data$FEELING                       [imp_mids_JMsep$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_mids_JMsep$data$Country_code==cou &imp_mids_JMsep$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_mids_JMsep$imp$FEELING[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("JMsep_densityplot_Feeling_country.png")
+```
+
+### Regressions
+```{r, message=FALSE}
+fit_allow_JMsep <- with(imp_mids_JMsep, lmer(ALLOW ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_allow_JMsep))
+ss=test$estimates
+estimates_allow=cbind(estimates_allow,ss[,1],ss[,5])
+colnames(estimates_allow)[(ncol(estimates_allow)-1):ncol(estimates_allow)] <- c("JMsep Estimates", "p-value")
+rm(test,ss)
+```
+
+```{r, message=FALSE}
+fit_feeling_JMsep <- with(imp_mids_JMsep, lmer(FEELING ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_feeling_JMsep))
+ss=test$estimates
+estimates_feeling=cbind(estimates_feeling,ss[,1],ss[,5])
+colnames(estimates_feeling)[(ncol(estimates_feeling)-1):ncol(estimates_feeling)] <- c("JMsep Estimates", "p-value")
+rm(test,ss)
+```
+
+```{r,warning=F}
+fit_commonpol_JMsep <- with(imp_mids_JMsep, lmer(COMMONPOLICY ~   Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction +ALLOW+FEELING+ 
+  (1 | Country_code), subset = source == "ZA"))
+test=testEstimates(as.mitml.result(fit_commonpol_JMsep))
+ss=test$estimates
+estimates_policy=cbind(estimates_policy,ss[,1],ss[,5])
+colnames(estimates_policy)[(ncol(estimates_policy)-1):ncol(estimates_policy)]<- c("JMsep Estimates", " p-value")
+rm(test,ss)
+```
+
+### Correlation results
+
+```{r,warning=F}
+corr_JMsep <- with(imp_mids_JMsep, cor(FEELING_ZA[source == "ZA"], 
+              ALLOW[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_JMsep)
+corr_allow=cbind(corr_allow,pool_corr)
+colnames(corr_allow)[(ncol(corr_allow)-2):ncol(corr_allow)] <- 
+  c("JMri Estimates","2.5%","97.5%")
+rm(corr_JMsep,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_JMsep <- with(imp_mids_JMsep, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    ALLOW[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_JMsep)
+corrn[j,]<-pool_corr
+rm(corr_JMsep,pool_corr)
+
+}
+corrj_allow=cbind(corrj_allow,corrn)
+colnames(corrj_allow) [(ncol(corrj_allow)-2):ncol(corrj_allow)] <- 
+  c("JMsep Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+```{r,warning=F}
+corr_JMsep <- with(imp_mids_JMsep, cor(FEELING_ZA[source == "ZA"], 
+              FEELING[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_JMsep)
+corr_feel=cbind(corr_feel,pool_corr)
+colnames(corr_feel)[(ncol(corr_feel)-2):ncol(corr_feel)] <- 
+  c("JMsep Estimates","2.5%","97.5%")
+rm(corr_JMsep,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_JMsep <- with(imp_mids_JMsep, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    FEELING[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_JMsep)
+corrn[j,]<-pool_corr
+rm(corr_JMsep,pool_corr)
+
+}
+corrj_feel=cbind(corrj_feel,corrn)
+colnames(corrj_feel) [(ncol(corrj_feel)-2):ncol(corrj_feel)] <- 
+  c("JMsep Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+## random intercept
+```{r, message=F}
+completed_data_JMri$Country_code <- factor(completed_data_JMri$Country_code,                                             levels = 1:16, labels = country_labels)
+```
+
+### density plots
+```{r, fig.width=10, fig.height=10, dpi=300}
+png("JMri_densityplot_AF.png", width = 2000, height = 1000, res = 300)
+
+densityplot(imp_mids_JMri, 
+            ~ALLOW + FEELING,  # The variables to plot
+            strip = strip.custom(factor.levels = c("Immigration rejection", "Perceived benefits of immigration")),  # Panel titles
+            scales = list(relation = "same"))
+
+dev.off()
+knitr::include_graphics("JMri_densityplot_AF.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("JMri_densityplot_Allow_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_mids_JMri$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_mids_JMri$data$Country_code)){
+  
+  plot(density(na.omit(imp_mids_JMri$data$ALLOW                       [imp_mids_JMri$data$Country_code==cou])),main=country_labels[cou],
+       xlab='')
+  coun_row=which(imp_mids_JMri$data$Country_code==cou &imp_mids_JMri$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_mids_JMri$imp$ALLOW[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("JMri_densityplot_Allow_country.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("JMri_densityplot_Feeling_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_mids_JMri$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_mids_JMri$data$Country_code)){
+  
+  plot(density(na.omit(imp_mids_JMri$data$FEELING                       [imp_mids_JMri$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_mids_JMri$data$Country_code==cou &imp_mids_JMri$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_mids_JMri$imp$FEELING[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("JMri_densityplot_Feeling_country.png")
+```
+
+### Regressions
+```{r, message=FALSE}
+fit_allow_JMri <- with(imp_mids_JMri, lmer(ALLOW ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_allow_JMri))
+ss=test$estimates
+estimates_allow=cbind(estimates_allow,ss[,1],ss[,5])
+colnames(estimates_allow)[(ncol(estimates_allow)-1):ncol(estimates_allow)] <- c("JMri Estimates", "p-value")
+rm(test,ss)
+```
+
+```{r, message=FALSE}
+fit_feeling_JMri <- with(imp_mids_JMri, lmer(FEELING ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_feeling_JMri))
+ss=test$estimates
+estimates_feeling=cbind(estimates_feeling,ss[,1],ss[,5])
+colnames(estimates_feeling)[(ncol(estimates_feeling)-1):ncol(estimates_feeling)] <- c("JMri Estimates", "p-value")
+rm(test,ss)
+```
+
+```{r,warning=F}
+fit_commonpol_JMri <- with(imp_mids_JMri, lmer(COMMONPOLICY ~  Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction +ALLOW+FEELING+ 
+  (1 | Country_code), subset = source == "ZA"))
+test=testEstimates(as.mitml.result(fit_commonpol_JMri))
+ss=test$estimates
+estimates_policy=cbind(estimates_policy,ss[,1],ss[,5])
+colnames(estimates_policy)[(ncol(estimates_policy)-1):ncol(estimates_policy)]<- c("JMri Estimates", " p-value")
+rm(test,ss)
+```
+
+### Correlation results
+
+```{r,warning=F}
+corr_JMri <- with(imp_mids_JMri, cor(FEELING_ZA[source == "ZA"], 
+              ALLOW[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_JMri)
+corr_allow=cbind(corr_allow,pool_corr)
+colnames(corr_allow)[(ncol(corr_allow)-2):ncol(corr_allow)] <- 
+  c("JMri Estimates","2.5%","97.5%")
+rm(corr_JMri,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_JMri <- with(imp_mids_JMri, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    ALLOW[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_JMri)
+corrn[j,]<-pool_corr
+rm(corr_2lpan,pool_corr)
+
+}
+corrj_allow=cbind(corrj_allow,corrn)
+colnames(corrj_allow) [(ncol(corrj_allow)-2):ncol(corrj_allow)] <- 
+  c("JMri Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+```{r,warning=F}
+corr_JMri <- with(imp_mids_JMri, cor(FEELING_ZA[source == "ZA"], 
+              FEELING[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_JMri)
+corr_feel=cbind(corr_feel,pool_corr)
+colnames(corr_feel)[(ncol(corr_feel)-2):ncol(corr_feel)] <- 
+  c("JMri Estimates","2.5%","97.5%")
+rm(corr_JMri,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_JMri <- with(imp_mids_JMri, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    FEELING[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_JMri)
+corrn[j,]<-pool_corr
+rm(corr_JMri,pool_corr)
+
+}
+corrj_feel=cbind(corrj_feel,corrn)
+colnames(corrj_feel) [(ncol(corrj_feel)-2):ncol(corrj_feel)] <- 
+  c("JMri Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+
+## random slope
+```{r, message=F}
+completed_data_JMrs$Country_code <- factor(completed_data_JMrs$Country_code,                                             levels = 1:16, labels = country_labels)
+```
+
+### density plots
+```{r, fig.width=10, fig.height=10, dpi=300}
+png("JMrs_densityplot_AF.png", width = 2000, height = 1000, res = 300)
+
+densityplot(imp_mids_JMrs, 
+            ~ALLOW + FEELING,  # The variables to plot
+            strip = strip.custom(factor.levels = c("Immigration rejection", "Perceived benefits of immigration")),  # Panel titles
+            scales = list(relation = "same"))
+
+dev.off()
+knitr::include_graphics("JMrs_densityplot_AF.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("JMrs_densityplot_Allow_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_mids_JMrs$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_mids_JMrs$data$Country_code)){
+  
+  plot(density(na.omit(imp_mids_JMrs$data$ALLOW                       [imp_mids_JMrs$data$Country_code==cou])),main=country_labels[cou],
+       xlab='')
+  coun_row=which(imp_mids_JMrs$data$Country_code==cou &imp_mids_JMrs$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_mids_JMrs$imp$ALLOW[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("JMrs_densityplot_Allow_country.png")
+```
+
+```{r, fig.width=15, fig.height=15, dpi=300}
+png("JMrs_densityplot_Feeling_country.png", width = 2000, height = 2000, res = 300)
+
+la=max(which(imp_mids_JMrs$data$source=="ESS"))
+par(mfrow=c(4,4))
+for(cou in unique(imp_mids_JMrs$data$Country_code)){
+  
+  plot(density(na.omit(imp_mids_JMrs$data$FEELING                       [imp_mids_JMrs$data$Country_code==cou])),main=country_labels[cou],xlab='')
+  coun_row=which(imp_mids_JMrs$data$Country_code==cou &imp_mids_JMrs$data$source!="ESS")-la
+  for(j in 1:m){
+    lines( density(imp_mids_JMrs$imp$FEELING[coun_row,j]),col='red')
+  }
+}
+dev.off()
+knitr::include_graphics("JMrs_densityplot_Feeling_country.png")
+```
+
+### Regressions
+```{r, message=FALSE}
+fit_allow_JMrs <- with(imp_mids_JMrs, lmer(ALLOW ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_allow_JMrs))
+ss=test$estimates
+estimates_allow=cbind(estimates_allow,ss[,1],ss[,5])
+colnames(estimates_allow)[(ncol(estimates_allow)-1):ncol(estimates_allow)] <- c("JMrs Estimates", "p-value")
+rm(test,ss)
+```
+
+```{r, message=FALSE}
+fit_feeling_JMrs <- with(imp_mids_JMrs, lmer(FEELING ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST + 
+  (1 | Country_code)))
+test=testEstimates(as.mitml.result(fit_feeling_JMrs))
+ss=test$estimates
+estimates_feeling=cbind(estimates_feeling,ss[,1],ss[,5])
+colnames(estimates_feeling)[(ncol(estimates_feeling)-1):ncol(estimates_feeling)] <- c("JMrs Estimates", "p-value")
+rm(test,ss)
+```
+
+```{r,warning=F}
+fit_commonpol_JMrs <- with(imp_mids_JMrs, lmer(COMMONPOLICY ~ Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction +ALLOW+FEELING+ 
+  (1 | Country_code), subset = source == "ZA"))
+test=testEstimates(as.mitml.result(fit_commonpol_JMrs))
+ss=test$estimates
+estimates_policy=cbind(estimates_policy,ss[,1],ss[,5])
+colnames(estimates_policy)[(ncol(estimates_policy)-1):ncol(estimates_policy)]<- c("JMrs Estimates", " p-value")
+rm(test,ss)
+```
+
+### Correlation results
+
+```{r,warning=F}
+corr_JMrs <- with(imp_mids_JMrs, cor(FEELING_ZA[source == "ZA"], 
+              ALLOW[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_JMrs)
+corr_allow=cbind(corr_allow,pool_corr)
+colnames(corr_allow)[(ncol(corr_allow)-2):ncol(corr_allow)] <- 
+  c("JMrs Estimates","2.5%","97.5%")
+rm(corr_JMrs,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_JMrs <- with(imp_mids_JMrs, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    ALLOW[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_JMrs)
+corrn[j,]<-pool_corr
+rm(corr_2lpan,pool_corr)
+
+}
+corrj_allow=cbind(corrj_allow,corrn)
+colnames(corrj_allow) [(ncol(corrj_allow)-2):ncol(corrj_allow)] <- 
+  c("JMrs Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+```{r,warning=F}
+corr_JMrs <- with(imp_mids_JMrs, cor(FEELING_ZA[source == "ZA"], 
+              FEELING[source == "ZA"]))$analyses
+pool_corr=pool_corr_fisher(corr_JMrs)
+corr_feel=cbind(corr_feel,pool_corr)
+colnames(corr_feel)[(ncol(corr_feel)-2):ncol(corr_feel)] <- 
+  c("JMrs Estimates","2.5%","97.5%")
+rm(corr_JMrs,pool_corr)
+```
+
+```{r,warning=F}
+corrn=matrix(NA,16,3)
+for (j in 1:16){
+corr_JMrs <- with(imp_mids_JMrs, cor(FEELING_ZA[source == "ZA" & Country_code==j], 
+                    FEELING[source == "ZA"& Country_code==j]))$analyses
+pool_corr=pool_corr_fisher(corr_JMrs)
+corrn[j,]<-pool_corr
+rm(corr_JMrs,pool_corr)
+
+}
+corrj_feel=cbind(corrj_feel,corrn)
+colnames(corrj_feel) [(ncol(corrj_feel)-2):ncol(corrj_feel)] <- 
+  c("JMrs Estimates","2.5%","97.5%")
+rm(corrn)
+```
+
+
+
+
+```{r,warning=F}
+write.xlsx(list(Regression_Allow = estimates_allow,
+    Regression_Feeling = estimates_feeling,
+    Regression_Policy = estimates_policy,
+    Correlations_Allow = corr_allow,
+    Correlationsj_Allow = corrj_allow,
+    Correlations_Feel = corr_feel,
+    Correlationsj_Feel = corrj_feel), 
+    file = "mice_mitml_results.xlsx", rowNames = TRUE)
+```
+

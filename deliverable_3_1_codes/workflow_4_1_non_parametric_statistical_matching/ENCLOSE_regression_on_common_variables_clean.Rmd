@@ -1,0 +1,224 @@
+---
+title: "Regression of target variables on common variables"
+author: "ENCLOSE project" 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# load packages
+```{r include=FALSE}
+library(dplyr)
+library(kableExtra)
+library(lme4)
+library(igraph)
+library(qgraph)
+library(fastDummies)
+library(lmerTest)
+library(writexl)
+```
+
+
+# DATA LOADINGS
+```{r}
+load("ENCLOSE_harmonized_data.RData")
+rm(list = setdiff(ls(), c("country","combined_data")))
+
+```
+
+# DATA SET CREATION
+```{r}
+items <- combined_data %>%
+  select(Country,
+Trust_Parliament,Trust_Legalsystem,
+Trust_police,Trust_politicalparties,
+Trust_EU,Trust_UN,
+Allow_samerace,Allow_differentrace,
+Allow_poorcountries,Impact_economy,
+Impact_cultural,Impact_country,
+Common_policy,Asylum_system,
+External_border,Imm_EU,Imm_NonEU,Im_contr,
+help_refugees)
+
+combined_data <- combined_data[ , !(names(combined_data) %in% colnames(items))]
+combined_data$Country_code<- as.integer(combined_data$Country_code)
+combined_data<-combined_data
+
+data_ESS=as.data.frame(combined_data[combined_data$source=="ESS",])
+data_ZA=as.data.frame(combined_data[combined_data$source=="ZA",])
+
+```
+
+
+
+
+```{r,warning=FALSE}
+
+# Define node groups
+groups <- list(1, 2, 3,4:6, 7:8, 9, 10:19, 12:14, 15:17, 18:20,21)
+
+color1<-"white"
+color2<-"lightblue1"
+color3<-"lightblue"
+color4<-"darkcyan"
+color5<-"cyan1"
+color6<-"cyan3"
+color7<-"green"
+color8<-"darkgreen"
+color9<-"limegreen"
+color10<-"magenta"
+color11<-"violet"
+
+# Assign colors to nodes
+node_colors <- rep(color1, length(groups[[1]]))
+node_colors <- c(node_colors,rep(color2, length(groups[[2]])))
+node_colors <- c(node_colors,rep(color3, length(groups[[3]])))
+node_colors <- c(node_colors,rep(color4, length(groups[[4]])))
+node_colors <- c(node_colors,rep(color5, length(groups[[5]]))) 
+node_colors <- c(node_colors,rep(color6, length(groups[[6]]))) 
+node_colors <- c(node_colors,rep(color7, length(groups[[7]]))) 
+node_colors <- c(node_colors,rep(color8, length(groups[[8]])))
+node_colors <- c(node_colors,rep(color9, length(groups[[9]])))
+node_colors <- c(node_colors, rep(color10, length(groups[[10]])))
+node_colors <- c(node_colors, rep(color11, length(groups[[11]])))
+```
+
+##ESS: Allow
+
+```{r, message=FALSE}
+fit_ALLOW <- lmer(ALLOW ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST+(1|Country_code),data=data_ESS)
+
+summary(fit_ALLOW)
+ss=as.data.frame(summary(fit_ALLOW)$coefficients)
+#write_xlsx(ss, "ALLOW_coefficients.xlsx")
+#rm(ss)
+```
+
+```{r,warning=FALSE}
+adj=matrix(0,dim(ss)[1],dim(ss)[1])
+adj[2:dim(ss)[1],1]=ss[2:dim(ss)[1],1]*(ss[2:dim(ss)[1],5]<.05)
+names=c("IR","Ag","G2","O2","O3","O4","D2","D3","Ed","P2","P3","AL",
+        "AQ","AC","LL","LQ","LC","EL","EQ","EC","T")
+rownames(adj) <-names
+colnames(adj) <- names
+groupList <- list("IR:Immigrants rejection"=1, "Ag: Age" =2,"Gender" = 3,  "O: Occupation"= 4:6,
+      "D: Domicile"=7:8,"Ed: Economic difficulties"=9,"P: Political Orientation"=10:11, "A: Attachment to country"= 12:14, "L: Life satisfaction"=15:17,"E: Economy satisfaction"=18:20, "T: TRUST"=21)
+
+png("regression_graph_Allow.png", width = 1200, height = 500, res = 300)
+qgraph(adj,layout = "spring", repulsion=0.9,
+       groups = groupList, 
+       color = c(color1,color2,color3,color4,color5,color6,color7,color8,color9,color10,color11),legend=T,legend.cex = 0.2,
+       legend.mode="groups",vsize = 8 
+)
+dev.off()
+knitr::include_graphics("regression_graph_Allow.png")
+```
+##ESS: Feeling
+
+```{r, message=FALSE}
+fit_FEELING <- lmer(FEELING ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST+(1|Country_code),data=data_ESS)
+
+summary(fit_FEELING)
+ss=as.data.frame(summary(fit_FEELING)$coefficients)
+#write_xlsx(ss, "FEELING_coefficients.xlsx")
+#rm(ss)
+```
+
+
+```{r,warning=FALSE}
+adj=matrix(0,dim(ss)[1],dim(ss)[1])
+adj[2:dim(ss)[1],1]=ss[2:dim(ss)[1],1]*(ss[2:dim(ss)[1],5]<.05)
+names=c("PB","Ag","G2","O2","O3","O4","D2","D3","Ed","P2","P3","AL",
+        "AQ","AC","LL","LQ","LC","EL","EQ","EC","T")
+rownames(adj) <-names
+colnames(adj) <- names
+groupList <- list("PB:Perceived benefits"=1, "Ag: Age" =2,"Gender" = 3,  "O: Occupation"= 4:6,
+      "D: Domicile"=7:8,"Ed: Economic difficulties"=9,"P: Political Orientation"=10:11, "A: Attachment to country"= 12:14, "L: Life satisfaction"=15:17,"E: Economy satisfaction"=18:20, "T: TRUST"=21)
+
+png("regression_graph_Feeling.png", width = 1200, height = 500, res = 300)
+qgraph(adj,layout = "spring", repulsion=0.9,
+       groups = groupList, 
+       color = c(color1,color2,color3,color4,color5,color6,color7,color8,color9,color10,color11),legend=T,legend.cex = 0.2,
+       legend.mode="groups",vsize = 8 
+)
+dev.off()
+knitr::include_graphics("regression_graph_Feeling.png")
+```
+
+
+##Eurobarometer: Common Policy
+
+```{r, message=FALSE}
+fit_COMMONPOLICY <- lmer(COMMONPOLICY ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST+(1|Country_code),data=data_ZA)
+
+summary(fit_COMMONPOLICY)
+ss=as.data.frame(summary(fit_COMMONPOLICY)$coefficients)
+#write_xlsx(ss, "COMMONPOLICY_coefficients.xlsx")
+#rm(ss)
+```
+
+
+```{r,warning=FALSE}
+adj=matrix(0,dim(ss)[1],dim(ss)[1])
+adj[2:dim(ss)[1],1]=ss[2:dim(ss)[1],1]*(ss[2:dim(ss)[1],5]<.05)
+names=c("EM","Ag","G2","O2","O3","O4","D2","D3","Ed","P2","P3","AL",
+        "AQ","AC","LL","LQ","LC","EL","EQ","EC","T")
+rownames(adj) <-names
+colnames(adj) <- names
+groupList <- list("EM:Euroskepticism on migration"=1, "Ag: Age" =2,"Gender" = 3,  "O: Occupation"= 4:6,
+      "D: Domicile"=7:8,"Ed: Economic difficulties"=9,"P: Political Orientation"=10:11, "A: Attachment to country"= 12:14, "L: Life satisfaction"=15:17,"E: Economy satisfaction"=18:20, "T: TRUST"=21)
+
+png("regression_graph_commonpolicy.png", width = 1200, height = 500, res = 300)
+qgraph(adj,layout = "spring", repulsion=0.9,
+       groups = groupList, 
+       color = c(color1,color2,color3,color4,color5,color6,color7,color8,color9,color10,color11),legend=T,legend.cex = 0.2,
+       legend.mode="groups",vsize = 8 
+)
+dev.off()
+knitr::include_graphics("regression_graph_commonpolicy.png")
+
+```
+
+
+##EUROBAROMETER: Aversion
+
+```{r, message=FALSE}
+fit_FEELING_ZA <- lmer(FEELING_ZA ~ Age + Gender + Occupation + Domicile +   Subjective_income + Political_Orientation + Attachment_country + 
+  Life_Satisfaction + Economy_Satisfaction + TRUST+(1|Country_code),data=data_ZA)
+
+summary(fit_FEELING_ZA)
+ss=as.data.frame(summary(fit_FEELING_ZA)$coefficients)
+#write_xlsx(ss, "FEELING_ZA_coefficients.xlsx")
+#rm(ss)
+```
+
+
+```{r,warning=FALSE}
+adj=matrix(0,dim(ss)[1],dim(ss)[1])
+adj[2:dim(ss)[1],1]=ss[2:dim(ss)[1],1]*(ss[2:dim(ss)[1],5]<.05)
+names=c("AI","Ag","G2","O2","O3","O4","D2","D3","Ed","P2","P3","AL",
+        "AQ","AC","LL","LQ","LC","EL","EQ","EC","T")
+rownames(adj) <-names
+colnames(adj) <- names
+groupList <- list("AI: Aversion to immigrants"=1, "Ag: Age" =2,"Gender" = 3,  "O: Occupation"= 4:6,
+      "D: Domicile"=7:8,"Ed: Economic difficulties"=9,"P: Political Orientation"=10:11, "A: Attachment to country"= 12:14, "L: Life satisfaction"=15:17,"E: Economy satisfaction"=18:20, "T: TRUST"=21)
+
+png("regression_graph_feelingza.png", width = 1200, height = 500, res = 300)
+qgraph(adj,layout = "spring", repulsion=0.9,
+       groups = groupList, 
+       color = c(color1,color2,color3,color4,color5,color6,color7,color8,color9,color10,color11),legend=T,legend.cex = 0.2,
+       legend.mode="groups",vsize = 8 
+)
+dev.off()
+knitr::include_graphics("regression_graph_feelingza.png")
+
+
+
+```

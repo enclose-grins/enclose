@@ -1,0 +1,200 @@
+---
+title: "MICE-MITML imputation"
+author: "ENCLOSE project" 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+
+# load packages
+```{r  message=FALSE, warning=FALSE}
+library(mice)
+library(miceadds) 
+library(mitml)
+library(lme4)
+library(multilevelTools)
+library(lattice)
+library(dplyr)
+library(writexl)
+library(ggplot2)
+```
+
+
+# DATA LOADINGS
+```{r}
+load("ENCLOSE_harmonized_data.RData")
+rm(list = setdiff(ls(), c("country","combined_data")))
+
+#parameter setting (INCREASE THIS PARAMETERS)
+m=2 ## number or multiple imputation
+maxit=10 ## iteration for mice
+nburn = 10#10000 # burnin for mitml 
+niter = 100#5000  # number of iteration for mitml
+
+```
+
+# DATA SET CREATION
+```{r}
+items <- combined_data %>%
+  select(Country,
+Trust_Parliament,Trust_Legalsystem,
+Trust_police,Trust_politicalparties,
+Trust_EU,Trust_UN,
+Allow_samerace,Allow_differentrace,
+Allow_poorcountries,Impact_economy,
+Impact_cultural,Impact_country,
+Common_policy,Asylum_system,
+External_border,Imm_EU,Imm_NonEU,Im_contr,
+help_refugees)
+
+combined_data <- combined_data[ , !(names(combined_data) %in% colnames(items))]
+combined_data$Country_code<- as.integer(combined_data$Country_code)
+
+rm(items)
+```
+
+
+# DATA IMPUTATION -mice
+
+
+## Bayesian linear regression
+```{r, message=FALSE, warning=FALSE}
+imp_setup  <- mice(combined_data, maxit = 0)
+meth <- imp_setup$method
+pred <- imp_setup $predictorMatrix
+pred[, c("COMMONPOLICY", "FEELING_ZA","source","Weights")] <- 0 #  Do not use it as predictor
+pred[c("Country_code","Age","Gender","Occupation","Domicile","Subjective_income","Political_Orientation","Attachment_country",   "Life_Satisfaction","Economy_Satisfaction","Weights",               "source","TRUST","COMMONPOLICY", "FEELING_ZA"),] <- 0 #  # Do not impute it
+pred[c("ALLOW","FEELING"), "Country_code"] <- 1 
+pred["ALLOW","FEELING"] <- 1  
+pred["FEELING","ALLOW"] <-1 
+```
+
+```{r, message=F}
+meth <- rep("", ncol(combined_data))  # Set default methods to "" (no imputation)
+names(meth) <- names(combined_data)   
+
+meth["ALLOW"] <- "norm"    
+meth["FEELING"] <- "norm"  
+
+imp_norm <- mice(combined_data, predictorMatrix = pred, method = meth, m = m, maxit = maxit,  print = FALSE)
+
+completed_data_norm <- complete(imp_norm, action = "long", include = TRUE)
+```
+
+
+```{r}
+plot(densityplot(imp_norm, ~ALLOW+FEELING))
+```
+
+## random intercepts
+```{r, message=FALSE, warning=FALSE}
+imp_setup  <- mice(combined_data, maxit = 0)
+meth <- imp_setup$method
+pred <- imp_setup $predictorMatrix
+pred[, c("COMMONPOLICY", "FEELING_ZA","source","Weights")] <- 0 #  Do not use it as predictor
+pred[c("Country_code","Age","Gender","Occupation","Domicile","Subjective_income","Political_Orientation","Attachment_country",   "Life_Satisfaction","Economy_Satisfaction","Weights",               "source","TRUST","COMMONPOLICY", "FEELING_ZA"),] <- 0 #  # Do not impute it
+pred[c("ALLOW","FEELING"), "Country_code"] <- -2  # Identify cluster variable
+pred["ALLOW","FEELING"] <- 1  
+pred["FEELING","ALLOW"] <-1 
+```
+
+```{r, message=F}
+meth <- rep("", ncol(combined_data))  # Set default methods to "" (no imputation)
+names(meth) <- names(combined_data)   
+
+meth["ALLOW"] <- "2l.pan"    
+meth["FEELING"] <- "2l.pan"  
+
+imp_FCSri <- mice(combined_data, predictorMatrix = pred, method = meth, m = m, maxit = maxit,  print = FALSE)
+
+completed_data_FCSri <- complete(imp_FCSri, action = "long", include = TRUE)
+```
+
+
+```{r}
+plot(densityplot(imp_FCSri, ~ALLOW+FEELING))
+```
+
+
+##  random intercepts and random slopes.
+```{r, message=F}
+pred1<-pred
+pred1["ALLOW", c("Age", "Gender", "Occupation", "Domicile", "Subjective_income", 
+                "Political_Orientation", "Attachment_country", "Life_Satisfaction", "Economy_Satisfaction","TRUST","FEELING")] <- 2
+
+pred1["FEELING", c("Age", "Gender", "Occupation", "Domicile", "Subjective_income",
+                  "Political_Orientation", "Attachment_country", "Life_Satisfaction", "Economy_Satisfaction","TRUST","ALLOW")] <- 2
+
+imp_FCSrs <- mice(combined_data, predictorMatrix = pred1, method = meth, m = m, maxit = maxit, print = FALSE)
+
+completed_data_imp_FCSrs <- complete(imp_FCSrs, action = "long", include = TRUE)
+```
+
+```{r}
+plot(densityplot(imp_FCSrs, ~ALLOW+FEELING))
+```
+
+
+######################################################################################
+# MITML DATA IMPUTATION - JM pan
+
+
+##  separately for each country
+```{r, message=F, results="hide"}
+combined_data$Country_code<- as.integer(combined_data$Country_code)
+type=c(-1,2,2,2,2,2,2,2,2,2,0,0,2,1,1,0,0)
+ imp_JMsep <- jomoImpute(combined_data,type = type,n.burn = nburn, n.iter = niter, m = m)
+```
+
+```{r}
+imp_mids_JMsep <- mitml.list2mids (mitmlComplete(imp_JMsep), data = combined_data)
+completed_data_JMsep <- complete(imp_mids_JMsep, action = "long", include = TRUE)
+```
+
+
+```{r}
+plot(densityplot(imp_mids_JMsep, ~ALLOW+FEELING))
+```
+
+
+##  random intercept 
+```{r, message=F, results="hide"}
+type=c(-2,2,2,2,2,2,2,2,2,2,0,0,2,1,1,0,0)
+ imp_JMri <- panImpute(combined_data,type = type,n.burn = nburn, n.iter = niter, m = m)
+```
+
+```{r}
+imp_mids_JMri <- mitml.list2mids (mitmlComplete(imp_JMri), data = combined_data)
+completed_data_JMri <- complete(imp_mids_JMri, action = "long", include = TRUE)
+```
+
+
+```{r}
+plot(densityplot(imp_mids_JMri, ~ALLOW+FEELING))
+```
+
+
+
+## random slope  
+
+```{r, message=F, results="hide"}
+type=c(-2,3,3,3,3,3,3,3,3,3,0,0,3,1,1,0,0)
+ imp_JMrs <- panImpute(combined_data,type = type,n.burn = nburn, n.iter = niter, m = m)
+```
+
+```{r}
+imp_mids_JMrs <- mitml.list2mids (mitmlComplete(imp_JMrs), data = combined_data)
+completed_data_JMrs <- complete(imp_mids_JMrs, action = "long", include = TRUE)
+```
+```{r}
+plot(densityplot(imp_mids_JMrs, ~ALLOW+FEELING))
+```
+
+```{r,warning=F}
+save.image("ENCLOSE_mice_mitml_imputation.RData")
+```
+
